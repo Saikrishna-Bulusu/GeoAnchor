@@ -1,0 +1,152 @@
+# GeoAnchor runtime -- the one file all three layers read.
+#
+# Each layer reads only its own section, so there is no shared mutable state
+# between the processes. The dashboard changes values at runtime by sending a
+# control message; nothing is written back here, so a restart always returns
+# to this known state.
+
+session:
+  tag: sydney_replay
+  runs_dir: runs
+
+bus:
+  # ipc:// is a unix socket -- lowest overhead, same machine only.
+  # Swap any of these for tcp://0.0.0.0:5561 to run a layer on another box.
+  data_pub:       ipc:///tmp/geoanchor/data.sock
+  processing_pub: ipc:///tmp/geoanchor/processing.sock
+  output_pub:     ipc:///tmp/geoanchor/output.sock
+  data_ctl:       ipc:///tmp/geoanchor/data.ctl
+  processing_ctl: ipc:///tmp/geoanchor/processing.ctl
+  output_ctl:     ipc:///tmp/geoanchor/output.ctl
+
+# ---------------------------------------------------------------------------
+data_layer:
+  map:
+    source: data/sydney/ref_tile.tif
+    store_dir: stores
+    # Descriptors are baked into the store, so changing `method` here forces a
+    # rebuild and the processing layer must use the same one. The store id
+    # carries the method name, so the two can never silently disagree.
+    method: xfeat_mnn
+    tile_px: 1024          # about 127 m on this tile; roughly 1.5x the footprint
+    overlap_px: 128        # so a frame on a tile seam still finds one whole tile
+    max_keypoints: 2048    # per tile. 25 tiles x 2048 = 51k reference keypoints
+    rebuild: false
+
+  feed:
+    type: file             # file | uvc | rtsp
+    path: demo/flight.mp4
+    sidecar: demo/flight_gt.jsonl   # per-frame truth, replay only
+    fps: 4
+    loop: false
+    realtime: true         # false makes a replay run as fast as it can
+    device: 0              # uvc: /dev/videoN
+    width: 1280
+    height: 720
+    frame_px: 512          # long edge used ONLY when altitude or fx_px is missing
+    jpeg_quality: 80
+    intrinsics:
+      # fx_px is the whole story for scale: GSD = altitude / fx_px.
+      # Measure it with a calibration board; do not take it from a datasheet.
+      # The demo video was generated at fx_px 1200 for a 1280 px frame.
+      fx_px: 1200.0
+      fy_px: 1200.0
+      cx_px: null
+      cy_px: null
+      dist: null           # [k1, k2, p1, p2, k3] enables undistortion
+
+  gps:
+    source: replay         # mavlink | replay | none
+    endpoint: udpin:0.0.0.0:14550    # or /dev/ttyTHS0 on the Xavier
+    # 921600 with hardware flow control (RTS/CTS) is what NGPS flies. 57600 is
+    # a default, not a working value: at 4 Hz with attitude and position
+    # streams it backs up, and a backed-up link shows as latency, not as an
+    # error. Set SERIALx_BAUD on the autopilot to match.
+    baud: 921600
+    stale_after_s: 3.0
+    heartbeat_timeout_s: 5.0
+
+  envelope:
+    agl_min_m: 50
+    agl_max_m: 100         # hard project cap; above this a fix is unreliable
+
+# ---------------------------------------------------------------------------
+processing_layer:
+  method: xfeat_mnn        # orb | sift | akaze | xfeat_mnn | xfeat_lg
+  max_keypoints: 4096
+  min_keypoints: 30
+  min_matches: 12
+
+  # THE rejection rule. Measured 31 Aug 2026 on 1323 fixes: a raw inlier-count
+  # threshold beat both NGPS Eq. 7 (0.467) and a learned estimator (0.641) at
+  # rejection, with AUC 0.724. It is free and needs no training. Keep it.
+  inlier_gate: 25
+  ransac_reproj_px: 3.0
+  rectify: true            # yaw-rectify the frame from attitude before matching
+  latency_budget_ms: 250   # ArduPilot clamps VISO_DELAY_MS to 0-250
+
+  search:
+    use_prior: true
+    prior_radius_m: 100    # around the last accepted fix. Drives latency
+                           # directly: it decides how many tiles get searched,
+                           # and match cost is linear in reference keypoints.
+    cold_start_max_tiles: 0   # 0 = search the whole map when there is no prior
+
+  covariance:
+    # gate_only emits a fixed sigma on whatever survives the gate. It is a
+    # PLACEHOLDER and is labelled as one in every record, because the finding
+    # is that only a learned estimator produces metres that track actual error
+    # (12.0->12.0, 21->21, 38->45) while Eq. 7 understates by 2.4x and
+    # saturates at 10 m. Point `model_path` at an exported estimator to switch.
+    backend: gate_only     # gate_only | learned
+    fixed_sigma_m: 8.0
+    clamp_m: [0.1, 100.0]  # EKF3 clamps horizontal to [0.01, 100]; stay inside
+    model_path: null
+
+# ---------------------------------------------------------------------------
+output_layer:
+  pair_window_s: 0.5       # how far apart a fix and a GPS sample may be
+  loss: nll                # nll | l2
+  alarm_error_m: 50.0
+
+  export:
+    flush_every: 20
+
+  fc:
+    # Nothing reaches the vehicle until enabled is true. Turn it on only after
+    # VISO_TYPE, VISO_POS_X/Y/Z and EK3_SRC1_POSXY=6 are set on the autopilot.
+    enabled: false
+    # off    nothing is sent
+    # open   the ACTUAL GPS is echoed over the ExternalNav path. Validates the
+    #        message, covariance, origin and EKF acceptance with a position
+    #        that is already known good, so any failure is a plumbing failure.
+    # closed the PREDICTED GPS is sent. The real thing.
+    loop_mode: open
+    firmware: ardupilot    # ardupilot | px4
+    controller: pixhawk6c
+    endpoint: udpout:127.0.0.1:14551
+    baud: 921600
+    # ODOMETRY is ArduPilot's documented preference and carries a quality
+    # field. NEVER GPS_INPUT: it has no covariance, which is the whole point.
+    message: ODOMETRY      # ODOMETRY | VISION_POSITION_ESTIMATE. Never GPS_INPUT:
+                           # it discards covariance, which is the whole point.
+    min_quality_inliers: 40   # closed loop needs more than the rejection gate
+    require_no_device_errors: true
+
+  # Display only. QGC renders any system it hears a heartbeat from, so this
+  # puts a second marker on the map wherever the pipeline thinks the aircraft
+  # is, beside where the autopilot thinks it is. Separate socket, separate
+  # system id, independent of loop_mode, and it never writes to the autopilot.
+  qgc:
+    enabled: false
+    endpoint: udpout:127.0.0.1:14550   # where QGC is listening
+    system_id: 2                        # the autopilot is normally 1
+    label: GeoAnchor
+    send_origin: false     # send SET_GPS_GLOBAL_ORIGIN once, if the FC has no origin
+    origin: null           # [lat, lon]; defaults to the first fix seen
+
+# ---------------------------------------------------------------------------
+api:
+  host: 0.0.0.0
+  port: 8000
+  cors_origins: ["*"]

@@ -1,0 +1,16 @@
+# Runtime. Every one of these has an aarch64 wheel.
+numpy
+opencv-python-headless>=4.8,<5   # OpenCV 5 moved the 2D-features constructors and
+                                 # cv2.AKAZE_create disappears. Pinned deliberately.
+PyYAML
+pyzmq                            # the layer bus
+pyproj                           # pixel -> geodetic. rasterio is NOT needed at runtime.
+pymavlink                        # actual GPS in, predicted position out
+fastapi
+uvicorn[standard]
+websockets                       # uvicorn answers a WS upgrade with 403 without it
+pillow
+
+# torch and kornia are installed by bootstrap.sh, not from here. On aarch64 the
+# plain `pip install torch` resolves to a CUDA build from PyPI, which is wrong
+# on every board this project targets, so the wheel has to be chosen by hand.

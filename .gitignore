@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+runs/
+stores/
+demo/
+xfeat/
+data/
+dashboard/node_modules/
+dashboard/.next/
+dashboard/out/
+.DS_Store

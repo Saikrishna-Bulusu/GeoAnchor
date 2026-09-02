@@ -1,0 +1,5 @@
+# Only needed to ingest a NEW GeoTIFF. The runtime reads the built store, which
+# carries the affine transform and the EPSG code, so a board that will only ever
+# consume a store copied from elsewhere does not need GDAL at all.
+rasterio>=1.3,<1.4 ; python_version < "3.9"
+rasterio ; python_version >= "3.9"
