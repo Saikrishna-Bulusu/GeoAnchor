@@ -44,7 +44,7 @@ export default function CameraView({ frame, fps = 3 }) {
       <header>
         <h2>Camera</h2>
         <span className="note" style={{ marginLeft: 'auto', fontFamily: 'var(--mono)' }}>
-          {frame ? `${frame.w}x${frame.h} · seq ${frame.seq}` : 'no frame'}
+          {frame ? `${frame.width}x${frame.height} · seq ${frame.seq}` : 'no frame'}
         </span>
       </header>
       <div className="body flush">

@@ -10,6 +10,10 @@ fastapi
 uvicorn[standard]
 websockets                       # uvicorn answers a WS upgrade with 403 without it
 pillow
+tqdm                             # NOT ours: accelerated_features/modules/xfeat.py imports it
+                                 # at module scope. methods.XFeatMethod.available() checks only
+                                 # torch and the weights file, so preflight reports xfeat as
+                                 # available and the first detect() is where it actually dies.
 
 # torch and kornia are installed by bootstrap.sh, not from here. On aarch64 the
 # plain `pip install torch` resolves to a CUDA build from PyPI, which is wrong
