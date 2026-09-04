@@ -299,10 +299,76 @@ neither of those.
     scripts/calibrate_camera.py   fx_px, which the whole rescale depends on.
     scripts/check_extnav.py       the live ExternalNav path, SITL first.
 
+## env80 sweep result, 3 Sep 2026 (laptop x86, CPU only)
+
+`results/env80_sweep/summary.json` — 326 frames (Scene_09 n=134, Scene_10 n=192),
+satellite reference, five matchers, gates 0-60, `prior: none`, rectify on,
+tile RANSAC on. Read `docs/` and the numbers themselves before re-deriving any
+of this.
+
+- **Use `xfeat_mnn` at inlier gate 10-12.** Only matcher clearing the
+  plausibility check at a useful rate on both scenes (46.3% / 18.8%), and about
+  18 ms per reference tile.
+- **Gate 10 is the knee, and it is worth a lot.** Scene_09 xfeat_mnn: gate 0
+  accepts 62 fixes with a 187.4 m worst case; gate 10 accepts 46 with a 5.96 m
+  worst case and 100% within 10 m. Above gate 15 the gate costs fixes and buys
+  no accuracy. Gates below 10 are dead controls — gate 0 and gate 5 are
+  identical because the plausibility check already removes everything under
+  five inliers.
+- **ORB, SIFT and AKAZE are not viable against real satellite reference.**
+  Zero plausible fixes in 192 Scene_10 frames for ORB and SIFT. The few they
+  return on Scene_09 are wrong by 62 m / 127 m / 81 m at the median — confident
+  fixes on the wrong building. Do not read their match counts as a quality
+  signal. (AKAZE on Scene_10 is the one oddity: 6 fixes of 192, all inside 5 m.)
+- **Latency is linear in reference tile count.** Scene_09's map is 9 tiles,
+  Scene_10's is 1, and per-tile cost is near-constant across both: orb ~5 ms,
+  akaze ~8 ms, sift ~13 ms, xfeat_mnn ~18 ms, xfeat_lg ~290-500 ms. So
+  xfeat_lg's 4539 ms median on Scene_09 is not a Scene_09 pathology, it is
+  nine tiles of LighterGlue.
+- **The GPS prior is load-bearing, not an optimisation.** This sweep ran
+  exhaustively. A 5 km x 5 km NSW Spatial reference at 0.5 m GSD is roughly 120
+  store tiles, which is ~2.2 s per frame with xfeat_mnn and over a minute with
+  xfeat_lg. `prior_radius: 120.0` already exists in `configs/env80.yaml` and is
+  unused — switch it on and measure before concluding anything about whether
+  the Xavier is fast enough.
+- **Unsettled: the two scenes disagree on which XFeat wins.** Scene_09 favours
+  xfeat_mnn over xfeat_lg 4.4:1 on plausible rate; Scene_10 reverses it 1.9:1.
+  Until that is explained, "xfeat_mnn wins" is a claim about Scene_09. Scene_04,
+  Scene_08, Scene_20 and Scene_21 are already downloaded in ~/Downloads and are
+  the obvious extension.
+- Percentiles only in anything written up: median, p90, p99, max. No mean, no
+  RMSE — a distribution with a 187 m tail has no meaningful average.
+
 ## Board notes: AGX Xavier
 
-- **JetPack 5.1.x is the ceiling.** L4T 35.x, Ubuntu 20.04, Python 3.8,
-  CUDA 11.4. JetPack 6 is Orin-only. Do not follow Orin instructions.
+- **JetPack 5.1.7 (L4T 35.6.5) is the ceiling and the last release for this
+  board.** Ubuntu 20.04, Python 3.8, CUDA 11.4. JetPack 6 is Orin-only, so do
+  not follow Orin instructions for wheels, TensorRT or flashing.
+- **Flashing host: the Legion runs Ubuntu 24.04, which NVIDIA does not support
+  for JetPack 5.** SDK Manager refuses to install natively; use NVIDIA's
+  SDK Manager Docker image. Its docs also say the container "does not currently
+  support flashing to external storages on all Jetson devices", so flash the
+  eMMC with it and move the rootfs to NVMe separately.
+- **Take the Ubuntu 20.04 Docker variant, not 22.04 or 24.04.** NVIDIA offers
+  all three, and only one works. Their host-OS compatibility matrix on
+  developer.nvidia.com/sdk-manager ticks JetPack 5.x for Ubuntu 18.04 and 20.04
+  only; 22.04 and 24.04 are blank for that row. A 22.04 container installs and
+  runs perfectly well and then simply does not list JetPack 5 for the Xavier,
+  which reads as a hardware or recovery-mode fault and is not. Verified on the
+  live page 3 Sep 2026; the file is
+  `sdkmanager-2.4.1.13536-ubuntu_20.04_docker.tar.gz`.
+- **JetPack 5.1.7 may sit behind `sdkmanager --archived-versions`.** SDK Manager
+  2.4.1 hides older SDK releases by default. If the Xavier appears but no
+  JetPack 5 release is listed, add that flag before concluding anything is
+  wrong.
+- **Boot firmware lives on the eMMC and cannot be moved.** "Booting from the
+  SSD" on this board means bootloader, kernel and extlinux.conf on eMMC, root
+  filesystem on NVMe. Full procedure in `docs/xavier_setup.md`.
+- **Pin the kernel after moving the rootfs** (`apt-mark hold nvidia-l4t-kernel
+  nvidia-l4t-kernel-dtbs nvidia-l4t-kernel-headers`). The bootloader reads the
+  kernel from eMMC while apt installs updates onto NVMe, so an upgrade leaves
+  the kernel and `/lib/modules` out of step and the board boots with no working
+  modules.
 - Python 3.8 means **torch caps at 2.4.x** for cp38 aarch64 wheels.
   `bootstrap.sh` pins accordingly. For a newer stack, install python3.10 from
   deadsnakes and re-run with `PYTHON=python3.10`.

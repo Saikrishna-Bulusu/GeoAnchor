@@ -10,3 +10,4 @@ dashboard/node_modules/
 dashboard/.next/
 dashboard/out/
 .DS_Store
+data
