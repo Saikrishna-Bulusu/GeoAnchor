@@ -67,7 +67,20 @@ processing_layer:
   # read it -- its --methods default is its own list -- so a sweep comparing
   # matchers is unaffected by what is set here.
   method: edgepoint2_s64
-  max_keypoints: 4096
+  # 2048 since 7 Sep 2026, for edgepoint2_s64. Three runs each on the live
+  # sydney replay, clocks pinned -- frame keypoints halved is strictly better
+  # here, not a tradeoff:
+  #
+  #     k      fixes        latency med       inliers med   error med
+  #     4096   22/20/20     722/699/753 ms    506/483/508   0.0051-0.0070 m
+  #     2048   29/30/27     535/546/585 ms    484/484/486   0.0056-0.0057 m
+  #
+  # More fixes BECAUSE it is faster: match cost is linear in frame keypoints,
+  # so the layer drops fewer frames while it works. Inliers barely move and sit
+  # two orders of magnitude above the gate either way, and the error does not
+  # move at all. Revert to 4096 if the method goes back to xfeat_mnn, where
+  # k=4096 dominated every lower value on both axes.
+  max_keypoints: 2048
   min_keypoints: 30
   min_matches: 12
   # THE GATE IS REFERENCE-SPECIFIC, and that is a finding rather than a knob.
