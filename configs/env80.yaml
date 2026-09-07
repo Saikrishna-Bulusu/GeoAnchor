@@ -76,7 +76,26 @@ processing_layer:
   # 55% of correspondences crossing to satellite, SP+LG 42%, ALIKED 17%).
   # A gate tuned on one reference type silently rejects everything on another,
   # exactly as NGPS Eq. 7 does across descriptors.
-  inlier_gate: 12
+  # Retuned 7 Sep 2026 on this file's own data (326 env80 frames, both scenes
+  # pooled, cold start) by the rule the sweep prints: take the gate where p99
+  # collapses without the accept rate collapsing with it. For xfeat_mnn the
+  # collapse is sharp and finishes at 10 --
+  #
+  #     gate      7      8      9     10     12     15
+  #     accept 29.1%  27.6%  27.0%  24.5%  21.8%  18.1%
+  #     p99    167.85 18.46   6.75   6.64   6.08   6.08
+  #     max    187.42 40.61  18.46   6.75   6.75   6.75
+  #
+  # -- so 10 is the last gate that buys anything: it is where the maximum error
+  # stops being catastrophic, and everything above it trades 3-6 points of
+  # accept rate for a few centimetres of p99. The previous 12 was close and not
+  # wrong; 10 is where the measurement actually lands.
+  #
+  # THIS NUMBER IS PER METHOD, not just per reference. edgepoint2_s64 produces
+  # no catastrophic outliers at any gate (max 8.36 m even at gate 6), so it
+  # wants 8: 37.4% accept at p99 7.38, against xfeat_mnn's 24.5% at its own
+  # best gate. Applying 10 to it silently throws away a third of its fixes.
+  inlier_gate: 10
   ransac_reproj_px: 3.0
   rectify: true
   latency_budget_ms: 250

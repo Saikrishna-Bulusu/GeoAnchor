@@ -502,17 +502,28 @@ keypoint count, that alone made EdgePoint2 look worse. `DEFAULT_SCORE = -12`
 saturates `top_k` and puts both methods on the same budget; Scene_10 accept
 then goes 5.7% -> 9.9%, exactly XFeat's.
 
-**The gate at 25 is tuned for XFeat's inlier distribution and hides the
-result.** Accept rate against gate, Scene_10, at equal p90 error:
+**The gate is per METHOD, and the old grid jumped over where it matters.**
+Pooled over both scenes, 326 frames, cold start:
 
-    gate            10      15      20      25
-    xfeat_mnn     17.2%   15.6%   13.5%    9.9%     p90 4.69 / 4.80 / 4.04 / 3.73
-    edgepoint2    37.0%   28.6%   18.2%    9.9%     p90 4.72 / 4.68 / 4.26 / 4.14
+    xfeat_mnn        gate     7      8      9     10     12     15
+                   accept  29.1%  27.6%  27.0%  24.5%  21.8%  18.1%
+                   p99    167.85  18.46   6.75   6.64   6.08   6.08
+                   max    187.42  40.61  18.46   6.75   6.75   6.75
 
-At gates 10-15 EdgePoint2-S64 gives **roughly twice the accept rate for the
-same p90 error**, and the two converge only at 25. Re-tune the gate per
-descriptor before comparing anything -- `env80_sweep.py` computes the whole
-curve for exactly this reason and its docstring says so.
+    edgepoint2_s64   gate     6      8     10     12     15     20
+                   accept  39.0%  37.4%  31.0%  27.3%  21.2%  13.5%
+                   p99      7.50   7.38   7.36   5.70   5.26   5.15
+                   max      8.36   7.50   7.50   6.62   6.62   5.15
+
+XFeat's p99 collapses over three gates -- 167.85 to 6.75 m across 7, 8, 9 --
+and 10 is where the maximum stops being catastrophic. **EdgePoint2 never has
+that cliff: its worst error is 8.36 m even at gate 6**, so it wants a much
+lower gate, and 8 gives 37.4% accept where xfeat_mnn manages 24.5% at its own
+best gate. Applying one number to both throws away a third of EdgePoint2's
+fixes. `configs/env80.yaml` is 10 (xfeat_mnn); use 8 if you switch the method.
+
+`GATES` in `env80_sweep.py` now includes 6, 8, 12 and 14 -- the old 5/10/15
+grid straddled the entire collapse.
 
 **Its failures are far less wild.** Ungated p90 on Scene_09 is 7.58 m against
 XFeat's 36.18 m. For a covariance estimator, and for anything that has to

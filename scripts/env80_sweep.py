@@ -50,7 +50,10 @@ from geoanchor.processing_layer import covariance as cov        # noqa: E402
 from geoanchor.processing_layer.rectify import Rectifier        # noqa: E402
 from geoanchor.processing_layer.solve import select_tiles, solve  # noqa: E402
 
-GATES = [0, 5, 10, 15, 20, 25, 30, 40, 60]
+# The interesting region is narrow and the old grid jumped straight over it:
+# on env80, xfeat_mnn's p99 falls 167.85 -> 18.46 -> 6.75 m across gates
+# 7, 8, 9, so 5 -> 10 -> 15 hid where the collapse actually happens.
+GATES = [0, 5, 6, 8, 10, 12, 14, 15, 20, 25, 30, 40, 60]
 BANDS = [5.0, 10.0, 20.0]
 FIELDS = ["scene", "mode", "method", "sample_id", "frame_index", "altitude_m",
           "view_angle_deg", "yaw_deg", "keypoints", "matches", "inliers",
