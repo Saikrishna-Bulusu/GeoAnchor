@@ -639,6 +639,71 @@ CPU: even a one-tile search is 287 ms.
 
 ---
 
+## xfeat_lg costs the most exactly when it fails
+
+LighterGlue ships `width_confidence: 0.95` -- point pruning on, early stopping
+off. Pruning is confidence-driven, so a confident match sheds points and runs
+fast while a failing one keeps them all and runs long. On env80 at k=2048,
+326 frames:
+
+    outcome            n     match_ms median   matches median
+    plausible solve    74         767              124
+    failed solve      252        7003                4
+
+**9.1x slower when the answer is useless**, and 28x over the 250 ms budget
+while producing nothing. For a latency-budgeted loop that is the worst possible
+cost profile: the hard frames, which are the ones worth spending time on, are
+also the ones that stall the layer and drop every frame arriving behind them.
+It is a stronger reason to keep xfeat_lg out of the flight path than the
+average cost is.
+
+This also explains an unstable row in `bench_matchers.py`: whether a benchmark
+frame happens to match decides which regime you measure. One reading came in at
+3321 ms where two others gave 2237 and 2254 on the same store. Run-to-run
+jitter on identical input is a further 8.4% stdev (1.38x min to max) -- at two
+seconds, this is simply a noisy thing to measure. Measurement ORDER was tested
+and is not a factor (1941 / 1777 / 1896 ms first, after seven other methods,
+and after gc).
+
+---
+
+## PLE-09: why 250 ms is out of reach here, and what would move it
+
+Xavier, MAXN, clocks pinned, edgepoint2_s64 at k=2048, sydney reference:
+
+    tiles  ref kp    match   detect+match
+        1    2048     20.7          223.9   fits
+        4    8192     88.8          292.0   1.2x over
+        9   18432    171.3          374.5   1.5x over
+       25   51200    246.2          449.4   1.8x over
+
+**Detection alone is 203 ms -- 81% of the budget before a single descriptor is
+compared.** That is the whole story, and it means the search-narrowing levers
+cannot fix it: even a one-tile search leaves 46 ms for everything else, and the
+prior realistically selects 9-13 tiles. Tightening `prior_radius_m` is worth
+doing but it is bounded by a term it does not touch.
+
+The only lever that reaches detection is pixels, and it is roughly linear:
+
+    scale     frame     Mpx   detect   match(9t)   total
+     1.00   646x484   0.313    181.7       161.1   342.8
+     0.85   549x411   0.226    120.0       162.5   282.4
+     0.55   355x266   0.094     85.8       152.3   238.0
+
+0.55 scale fits, at 238 ms. **The accuracy cost of that is unpriced** -- a
+smaller frame covers less ground and changes the GSD match to the reference, so
+env80 has to be re-run before anyone believes it.
+
+Three things follow. The classical matchers already fit on both boards (orb
+91.9 ms total at one tile here, 56.6 ms p95 on the Pi 5) and the question for
+them is accuracy, not speed. This board is the wrong end of the compute curve
+and its own notes say so -- a Pi 5 is 1.4-2.0x faster per core on this workload,
+which puts edgepoint2's detection near 110 ms rather than 203 ms. And the
+number that actually decides deployment is still `OVERHEAD_MS`, which needs a
+camera on the rig and has never been measured.
+
+---
+
 ## Latency, and why it is the binding constraint
 
 There is **no minimum-rate check** on ArduPilot's ExternalNav path. Below 1 Hz
