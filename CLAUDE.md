@@ -369,6 +369,20 @@ of this.
   kernel from eMMC while apt installs updates onto NVMe, so an upgrade leaves
   the kernel and `/lib/modules` out of step and the board boots with no working
   modules.
+- **This board cannot build a store from a GeoTIFF.** rasterio is not installed
+  and will not `pip install` here: there is no cp38 aarch64 wheel, so pip tries
+  to build from source and fails at "getting requirements to build wheel" with
+  no GDAL headers present. `apt` has `python3-rasterio` 1.1.3, but `.venv` is
+  created with `include-system-site-packages = false`, so an apt install is
+  invisible to the runtime. Either `sudo apt install libgdal-dev` and then pip
+  into the venv, or -- what `bootstrap.sh` already advises -- build the store on
+  a machine that has rasterio and copy `stores/<id>/` across. The runtime needs
+  the store, never rasterio. **This bites whenever `data_layer.map.method`
+  changes**, because the store id carries the method and a new one has to be
+  ingested from the source raster: the data layer stops at `DLE-07`, publishes
+  nothing, and the processing layer then reports `PLDE-01` correctly.
+  `data/sydney/ref_tile.raw.png` is NOT a substitute for the tif -- it is
+  4033x4033 against the tif's 4112x4093, a different raster.
 - Python 3.8 means **torch caps at 2.4.x** for cp38 aarch64 wheels.
   `bootstrap.sh` pins accordingly. For a newer stack, install python3.10 from
   deadsnakes and re-run with `PYTHON=python3.10`.

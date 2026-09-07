@@ -27,7 +27,7 @@ data_layer:
     # Descriptors are baked into the store, so changing `method` here forces a
     # rebuild and the processing layer must use the same one. The store id
     # carries the method name, so the two can never silently disagree.
-    method: xfeat_mnn
+    method: edgepoint2_s64
     tile_px: 1024          # about 127 m on this tile; roughly 1.5x the footprint
     overlap_px: 128        # so a frame on a tile seam still finds one whole tile
     max_keypoints: 2048    # per tile. 25 tiles x 2048 = 51k reference keypoints
@@ -78,17 +78,34 @@ data_layer:
 
 # ---------------------------------------------------------------------------
 processing_layer:
-  method: xfeat_mnn        # orb | sift | akaze | xfeat_mnn | xfeat_lg
-                           # | edgepoint2_s64 (faster, needs its own gate --
-                           #   see CLAUDE.md; s32/t32 lose accuracy for no speed)
+  # edgepoint2_s64 since 7 Sep 2026. On env80 it is 1.3-1.6x faster than
+  # xfeat_mnn (detect 248 -> 149-170 ms) and its failures are far less wild:
+  # ungated p90 on Scene_09 is 7.58 m against XFeat's 36.18 m. Must match
+  # data_layer.map.method above -- PLE-02 refuses to run if they disagree.
+  # s32 and t32 are NOT interchangeable with s64: they lose accuracy on the
+  # hard scene and buy no speed, because match cost is the similarity matrix,
+  # not the descriptor width.
+  method: edgepoint2_s64   # orb | sift | akaze | xfeat_mnn | xfeat_lg
+                           # | edgepoint2_s64 | edgepoint2_s32 | edgepoint2_t32
   max_keypoints: 4096
   min_keypoints: 30
   min_matches: 12
 
   # THE rejection rule. Measured 31 Aug 2026 on 1323 fixes: a raw inlier-count
   # threshold beat both NGPS Eq. 7 (0.467) and a learned estimator (0.641) at
-  # rejection, with AUC 0.724. It is free and needs no training. Keep it.
-  inlier_gate: 25
+  # rejection, with AUC 0.724. It is free and needs no training. Keep the rule.
+  #
+  # The VALUE moves with the method. 25 was measured against xfeat_mnn;
+  # edgepoint2_s64 has no catastrophic cliff to gate away -- its worst env80
+  # error is 8.36 m even at gate 6, where xfeat_mnn's is 187 m -- so it wants 8,
+  # which accepts 37.4% against xfeat_mnn's 24.5% at xfeat's own best gate of
+  # 10. Both from 326 env80 frames, cold start; see CLAUDE.md for the curves.
+  #
+  # CAVEAT: 8 is measured on CROSS-VIEW SATELLITE. This file's reference is the
+  # sydney tile and its feed is synthetic, where inliers run 178-851 and no gate
+  # in this range ever binds -- so the value is carried over, not verified here.
+  # Re-measure before trusting it on a new reference, as env80.yaml warns.
+  inlier_gate: 8
   ransac_reproj_px: 3.0
   rectify: true            # yaw-rectify the frame from attitude before matching
   latency_budget_ms: 250   # ArduPilot clamps VISO_DELAY_MS to 0-250

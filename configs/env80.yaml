@@ -30,7 +30,7 @@ data_layer:
                                  # losing most of their correspondences on.
     anchor: null                 # [lat, lon] for the declared local origin
     store_dir: stores
-    method: xfeat_mnn
+    method: edgepoint2_s64
     tile_px: 1024
     overlap_px: 128
     max_keypoints: 2048
@@ -63,7 +63,10 @@ data_layer:
     agl_max_m: 100
 
 processing_layer:
-  method: xfeat_mnn
+  # Used when the LIVE pipeline runs with this config. env80_sweep.py does NOT
+  # read it -- its --methods default is its own list -- so a sweep comparing
+  # matchers is unaffected by what is set here.
+  method: edgepoint2_s64
   max_keypoints: 4096
   min_keypoints: 30
   min_matches: 12
@@ -95,7 +98,7 @@ processing_layer:
   # no catastrophic outliers at any gate (max 8.36 m even at gate 6), so it
   # wants 8: 37.4% accept at p99 7.38, against xfeat_mnn's 24.5% at its own
   # best gate. Applying 10 to it silently throws away a third of its fixes.
-  inlier_gate: 10
+  inlier_gate: 8
   ransac_reproj_px: 3.0
   rectify: true
   latency_budget_ms: 250
