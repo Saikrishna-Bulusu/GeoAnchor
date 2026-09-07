@@ -338,8 +338,11 @@ class EdgePoint2Method(Method):
             return False, f"unknown config '{self.cfg}'. Known: {', '.join(self.CONFIGS)}"
         try:
             importlib.import_module("torch")
-        except ImportError:
-            return False, "torch is not installed -- run bootstrap.sh"
+        except ImportError as exc:
+            # Report what actually failed. "torch is not installed" is a guess,
+            # and it sends you to bootstrap.sh when the real fault is a broken
+            # link or a shadowed symbol in an installed torch.
+            return False, f"torch unusable ({exc}) -- run bootstrap.sh"
         if not (root / "weights" / f"{self.cfg}.pth").exists():
             return False, f"weights missing at {root/'weights'/f'{self.cfg}.pth'}"
         return True, ""
@@ -405,15 +408,21 @@ class EdgePoint2Method(Method):
         da = torch.from_numpy(fa.desc)
         db = torch.from_numpy(fb.desc)
         with torch.inference_mode():
+            # Both reductions run along the CONTIGUOUS axis, which is why the
+            # transpose product is computed rather than reducing the first
+            # matrix with max(dim=0). Against a 51200-keypoint reference that
+            # one change is worth ~2x: max(dim=0) walks a (4096, 51200)
+            # row-major tensor across its stride and spends the whole time in
+            # cache misses. Two matmuls and two fast reductions beat one matmul
+            # and one slow one, even though it materialises twice the memory.
+            # XFeat's own matcher is written this way for the same reason.
             cossim = da @ db.T
-            _, m12 = cossim.max(dim=1)
-            _, m21 = cossim.max(dim=0)
+            cossim_t = db @ da.T
+            best, m12 = cossim.max(dim=1)
+            _, m21 = cossim_t.max(dim=1)
             idx1 = torch.arange(len(m12))
-            mutual = m21[m12] == idx1
-            idx1, idx2 = idx1[mutual], m12[mutual]
-            conf = cossim[idx1, idx2]
-            keep = conf > self.min_cossim
-            idx1, idx2, conf = idx1[keep], idx2[keep], conf[keep]
+            keep = (m21[m12] == idx1) & (best > self.min_cossim)
+            idx1, idx2, conf = idx1[keep], m12[keep], best[keep]
         return (idx1.cpu().numpy().astype(int),
                 idx2.cpu().numpy().astype(int),
                 conf.cpu().numpy().astype(np.float32))

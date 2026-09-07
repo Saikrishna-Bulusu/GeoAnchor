@@ -129,15 +129,26 @@ def build_store(source: Path, store_root: Path, method_name: str, tile_px: int =
             if log:
                 log.error(code, f"{exc} -- rebuilding")
 
-    geo = read_georeference(source)
-    if log:
-        log.step("DL-05", f"{source.name}: EPSG:{geo['epsg']}, {geo['gsd_m_px']:.4f} m/px",
-                 size=f"{geo['width']}x{geo['height']}")
-
+    # The method is built BEFORE the georeference is read, and the order is
+    # load-bearing on aarch64. read_georeference imports rasterio, which pulls
+    # in GDAL and its dependency tree; that exhausts the process's static TLS
+    # surplus, and a torch imported afterwards dies with
+    #
+    #     libgomp-....so: cannot allocate memory in static TLS block
+    #
+    # which surfaces here as DLE-01 "torch unusable" on a board where torch is
+    # installed and imports perfectly well on its own. Touching torch first
+    # gets libgomp its TLS while there is still room. Failing on an unavailable
+    # method before doing any file I/O is the right order anyway.
     method = M.build(method_name, max_keypoints=max_keypoints)
     ok, why = method.available()
     if not ok:
         raise MapPrepError("DLE-01", f"method '{method_name}' unavailable: {why}")
+
+    geo = read_georeference(source)
+    if log:
+        log.step("DL-05", f"{source.name}: EPSG:{geo['epsg']}, {geo['gsd_m_px']:.4f} m/px",
+                 size=f"{geo['width']}x{geo['height']}")
 
     plan = plan_tiles(geo["width"], geo["height"], tile_px, overlap_px)
     if log:

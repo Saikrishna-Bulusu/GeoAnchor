@@ -369,20 +369,25 @@ of this.
   kernel from eMMC while apt installs updates onto NVMe, so an upgrade leaves
   the kernel and `/lib/modules` out of step and the board boots with no working
   modules.
-- **This board cannot build a store from a GeoTIFF.** rasterio is not installed
-  and will not `pip install` here: there is no cp38 aarch64 wheel, so pip tries
-  to build from source and fails at "getting requirements to build wheel" with
-  no GDAL headers present. `apt` has `python3-rasterio` 1.1.3, but `.venv` is
-  created with `include-system-site-packages = false`, so an apt install is
-  invisible to the runtime. Either `sudo apt install libgdal-dev` and then pip
-  into the venv, or -- what `bootstrap.sh` already advises -- build the store on
-  a machine that has rasterio and copy `stores/<id>/` across. The runtime needs
-  the store, never rasterio. **This bites whenever `data_layer.map.method`
-  changes**, because the store id carries the method and a new one has to be
-  ingested from the source raster: the data layer stops at `DLE-07`, publishes
-  nothing, and the processing layer then reports `PLDE-01` correctly.
-  `data/sydney/ref_tile.raw.png` is NOT a substitute for the tif -- it is
+- **rasterio here is `rasterio<1.3`, and the pin is not optional.** Ubuntu
+  20.04 ships GDAL 3.0.4; rasterio 1.3+ demands GDAL >= 3.1 and refuses at the
+  "getting requirements to build wheel" step with `ERROR: GDAL >= 3.1 is
+  required`. The working sequence is `sudo apt install libgdal-dev` then
+  `pip install "rasterio<1.3"`, which builds 1.2.10 from source in a few
+  minutes. Needed only to ingest a GeoTIFF into a store -- which happens
+  whenever `data_layer.map.method` changes, since the store id carries the
+  method. `data/sydney/ref_tile.raw.png` is NOT a substitute for the tif: it is
   4033x4033 against the tif's 4112x4093, a different raster.
+- **Import torch before rasterio, or torch will not import at all.** Reading a
+  GeoTIFF pulls in GDAL and its dependency tree, which exhausts the process's
+  static TLS surplus; a torch imported afterwards dies with `libgomp-....so:
+  cannot allocate memory in static TLS block`. On this board that surfaced as
+  `DLE-01 method 'edgepoint2_s64' unavailable: torch is not installed` during a
+  map build, on a machine where torch imports perfectly well on its own --
+  every import ordering tested by hand worked, because the failure needs the
+  full GDAL load that only `read_georeference` triggers. `mapprep.build_store`
+  now constructs and validates the method before reading the georeference, and
+  the order is load-bearing; do not tidy it back.
 - Python 3.8 means **torch caps at 2.4.x** for cp38 aarch64 wheels.
   `bootstrap.sh` pins accordingly. For a newer stack, install python3.10 from
   deadsnakes and re-run with `PYTHON=python3.10`.
@@ -542,6 +547,17 @@ grid straddled the entire collapse.
 **Its failures are far less wild.** Ungated p90 on Scene_09 is 7.58 m against
 XFeat's 36.18 m. For a covariance estimator, and for anything that has to
 survive a bad fix, that matters more than the accept rate does.
+
+**Reduce along the contiguous axis when matching.** The obvious mutual-nearest
+-neighbour -- one product, then `max(dim=1)` and `max(dim=0)` -- is about half
+the speed of computing the transpose product as well and reducing both with
+`max(dim=1)`. Against the 51200-keypoint sydney store that is 902 ms against
+545 ms, because `max(dim=0)` walks a (4096, 51200) row-major tensor across its
+stride and spends the run in cache misses. Two matmuls and two fast reductions
+beat one matmul and one slow one even at twice the memory. XFeat's own matcher
+is written this way; the first version of `EdgePoint2Method.match` was not, and
+it made EdgePoint2 look SLOWER than XFeat on the live pipeline (949 ms against
+837 ms median) while being faster on every isolated benchmark.
 
 Where it still loses: Scene_09 (9 tiles) at every gate -- 22.4% against 35.1%
 at gate 10 -- though it is more precise at every gate at or above 15 (p90 3.06
