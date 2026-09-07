@@ -232,11 +232,16 @@ def create_app(cfg: cfgmod.Config):
         if not root or not root.is_dir():
             return []
         out = []
-        for d in sorted(root.iterdir(), reverse=True):
+        for d in root.iterdir():
             s = d / "session.json"
             if s.exists():
                 out.append({"name": d.name, "size": s.stat().st_size,
                             "modified": s.stat().st_mtime})
+        # Newest first BY TIME, not by name. Sorting the directory names put
+        # every verify_* run ahead of every dated session -- 'v' outranks '2'
+        # -- so the dashboard, which shows the first eight, listed three-day-old
+        # verification runs and never the session flushed a minute earlier.
+        out.sort(key=lambda r: r["modified"], reverse=True)
         return out
 
     @app.get("/api/runs/{name}")

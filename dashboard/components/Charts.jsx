@@ -45,10 +45,10 @@ function Charts({ records, budgetMs = 250 }) {
   return (
     <div className="grid cols-2">
       <Chart title="Position error" subtitle="predicted vs actual, and the sigma claimed for it">
-        <LineChart data={data} margin={{ top: 6, right: 10, left: -8, bottom: 0 }}>
+        <LineChart data={data} margin={{ top: 6, right: 10, left: 0, bottom: 0 }}>
           <CartesianGrid stroke="var(--line)" strokeDasharray="2 4" vertical={false} />
           <XAxis dataKey="step" {...AXIS} />
-          <YAxis {...AXIS} unit=" m" width={54} />
+          <YAxis {...AXIS} unit=" m" width={64} />
           <Tooltip {...TIP} />
           <Legend wrapperStyle={{ fontSize: 11, color: 'var(--ink-faint)' }} />
           <Line type="monotone" dataKey="error" name="error (m)" stroke="var(--bad)"
@@ -59,10 +59,10 @@ function Charts({ records, budgetMs = 250 }) {
       </Chart>
 
       <Chart title="Calibration loss" subtitle="negative log-likelihood of the error under the stated sigma">
-        <LineChart data={data} margin={{ top: 6, right: 10, left: -8, bottom: 0 }}>
+        <LineChart data={data} margin={{ top: 6, right: 10, left: 0, bottom: 0 }}>
           <CartesianGrid stroke="var(--line)" strokeDasharray="2 4" vertical={false} />
           <XAxis dataKey="step" {...AXIS} />
-          <YAxis {...AXIS} width={54} />
+          <YAxis {...AXIS} width={64} />
           <Tooltip {...TIP} />
           <Line type="monotone" dataKey="loss" name="loss" stroke="var(--warn)"
                 dot={false} strokeWidth={1.8} isAnimationActive={false} connectNulls />
@@ -70,7 +70,7 @@ function Charts({ records, budgetMs = 250 }) {
       </Chart>
 
       <Chart title="Latency" subtitle={`capture to fix; ArduPilot compensates only to ${budgetMs} ms`}>
-        <LineChart data={data} margin={{ top: 6, right: 10, left: -8, bottom: 0 }}>
+        <LineChart data={data} margin={{ top: 6, right: 10, left: 0, bottom: 0 }}>
           <CartesianGrid stroke="var(--line)" strokeDasharray="2 4" vertical={false} />
           <XAxis dataKey="step" {...AXIS} />
           <YAxis {...AXIS} unit=" ms" width={62} />
@@ -94,11 +94,11 @@ function Charts({ records, budgetMs = 250 }) {
         <LineChart
           data={data.map((d) => d.error).filter((v) => Number.isFinite(v)).sort((a, b) => a - b)
             .map((v, i, arr) => ({ q: Math.round((100 * (i + 1)) / arr.length), error: v }))}
-          margin={{ top: 6, right: 10, left: -8, bottom: 0 }}
+          margin={{ top: 6, right: 10, left: 0, bottom: 0 }}
         >
           <CartesianGrid stroke="var(--line)" strokeDasharray="2 4" vertical={false} />
           <XAxis dataKey="q" {...AXIS} unit="%" />
-          <YAxis {...AXIS} unit=" m" width={54} />
+          <YAxis {...AXIS} unit=" m" width={64} />
           <Tooltip {...TIP} />
           <Line type="monotone" dataKey="error" name="error (m)" stroke="var(--accent)"
                 dot={false} strokeWidth={1.8} isAnimationActive={false} />
