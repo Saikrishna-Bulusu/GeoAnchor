@@ -1,4 +1,5 @@
 'use client';
+import { memo } from 'react';
 import {
   CartesianGrid, Legend, Line, LineChart, ReferenceLine,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -27,8 +28,13 @@ function Chart({ title, subtitle, children }) {
   );
 }
 
-export default function Charts({ records, budgetMs = 250 }) {
-  const data = (records || []).slice(-400).map((r) => ({
+const WINDOW = 400;
+
+// Memoised: a camera frame arrives 15-30 times a second and re-renders the
+// page, but none of those change a record. Without this, four recharts trees
+// are rebuilt per frame on a machine whose CPU the matcher wants.
+function Charts({ records, budgetMs = 250 }) {
+  const data = (records || []).slice(-WINDOW).map((r) => ({
     step: r.time_step,
     error: r.error_m,
     sigma: r.sigma_m,
@@ -76,9 +82,17 @@ export default function Charts({ records, budgetMs = 250 }) {
         </LineChart>
       </Chart>
 
-      <Chart title="Error distribution" subtitle="sorted ascending — read the knee, not the tail">
+      <Chart
+        title="Error distribution"
+        subtitle={(records || []).length > WINDOW
+          /* The Session panel summarises every record; these charts hold the
+             last WINDOW. Say so, or the p99 in the panel and the tail of this
+             curve look like they disagree. */
+          ? `last ${WINDOW} of ${records.length} — sorted ascending`
+          : 'sorted ascending — read the knee, not the tail'}
+      >
         <LineChart
-          data={[...data].map((d) => d.error).filter((v) => v != null).sort((a, b) => a - b)
+          data={data.map((d) => d.error).filter((v) => Number.isFinite(v)).sort((a, b) => a - b)
             .map((v, i, arr) => ({ q: Math.round((100 * (i + 1)) / arr.length), error: v }))}
           margin={{ top: 6, right: 10, left: -8, bottom: 0 }}
         >
@@ -93,3 +107,5 @@ export default function Charts({ records, budgetMs = 250 }) {
     </div>
   );
 }
+
+export default memo(Charts);

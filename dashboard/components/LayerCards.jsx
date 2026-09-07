@@ -13,19 +13,28 @@ const LAYERS = [
  * are independent processes, and the dashboard should make it obvious when one
  * has died while the other two carry on.
  */
-export default function LayerCards({ layers, logs }) {
+export default function LayerCards({ layers, logs, clockOffset = 0, replay = false }) {
   return (
     <div className="grid cols-3">
       {LAYERS.map((L) => {
         const entry = layers?.[L.id];
         const st = entry?.status;
-        const fresh = st ? Date.now() / 1000 - st.t_unix < 4 : false;
+        // Board clock, not browser clock: st.t_unix was stamped on the Jetson.
+        // See the note in useTelemetry -- an unsynchronised board is the normal
+        // case here, and comparing the two clocks directly is how a dead layer
+        // keeps showing green.
+        //
+        // In replay the question does not apply: these timestamps are from a
+        // flight that is over, so "not fresh" would be true and meaningless.
+        // A recorded layer reports what it did, not whether it is breathing.
+        const fresh = replay ? false : (st ? Date.now() / 1000 + clockOffset - st.t_unix < 4 : false);
         const counts = st?.counts || {};
         const dev = counts.live_device_errors || 0;
         const rows = (logs || []).filter((l) => l.layer === L.id).slice(-60).reverse();
 
         let tone = 'stale';
-        if (fresh && dev === 0) tone = 'live';
+        if (replay) tone = st ? (counts.device_errors ? 'warn' : '') : 'stale';
+        else if (fresh && dev === 0) tone = 'live';
         else if (fresh) tone = 'warn';
 
         return (
@@ -40,13 +49,20 @@ export default function LayerCards({ layers, logs }) {
               <span className="tally err"><b>{counts.errors ?? 0}</b> errors</span>
               <span className="tally dev"><b>{counts.device_errors ?? 0}</b> device</span>
               <span style={{ marginLeft: 'auto' }}>
-                {st ? `${st.rate_hz?.toFixed?.(2) ?? '0.00'} Hz` : 'no heartbeat'}
+                {!st ? 'no heartbeat'
+                  : replay ? `recorded · ${st.uptime_s ?? 0}s`
+                  : fresh ? `${st.rate_hz?.toFixed?.(2) ?? '0.00'} Hz`
+                  /* Silence is the signal this whole architecture exists to
+                     show, so say how long it has lasted rather than freezing
+                     on the last rate it reported. */
+                  : `silent ${Math.round(Date.now() / 1000 + clockOffset - st.t_unix)}s`}
               </span>
             </div>
             <div className="codestream">
               {rows.length === 0 && (
                 <div className="empty">
-                  {fresh ? 'no codes yet' : 'layer is not reporting'}
+                  {replay ? 'no codes recorded for this layer'
+                    : fresh ? 'no codes yet' : 'layer is not reporting'}
                 </div>
               )}
               {rows.map((l, i) => (

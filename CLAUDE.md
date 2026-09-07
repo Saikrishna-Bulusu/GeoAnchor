@@ -376,6 +376,14 @@ of this.
 
       sudo nvpmodel -m 0 && sudo jetson_clocks && sudo nvpmodel -q
 
+  How forgetting presents: the board boots `MODE_15W_DESKTOP`, which onlines
+  **four of the eight cores** (`/sys/devices/system/cpu/online` reads `0-3`)
+  while leaving per-core clocks at 2.19 GHz. Nothing errors. `PL-01` and the
+  dashboard's board card both report "4 cores" -- correct, and easy to read as
+  the board's spec rather than as a mode. Measured end-to-end on the replay,
+  MAXN roughly halves the solve (1.0-1.9 s -> 0.56-1.04 s) and roughly doubles
+  the fixes that land. Check `nproc` before believing any number off this board.
+
 - The Xavier is a **bench board, not a flight step** -- 30 W and the weight
   rule it out of the airframe. It is the easiest board to set up, which is why
   the full pipeline is developed here first and then ported down. Take its
@@ -404,6 +412,97 @@ lever is `top_k` (attention is quadratic in keypoints). xfeat_cpu fits with
 **Measure OVERHEAD_MS on the real rig before anything else.** Camera capture,
 ISP, copy and the MAVLink hop above 88 ms and xfeat_cpu misses; below, it fits.
 Everything else about the deployment question is downstream of that number.
+
+### Do not compare a Xavier number to this table without checking the geometry
+
+`scripts/bench_matchers.py` prints detect and match separately at a stated
+reference geometry, so any two boards compare on the same row. Run it on each
+board and diff; do not compare a number to the Pi table without checking the
+tile count behind it.
+
+Xavier at MAXN, 8 threads, 646x484 frame, xfeat_mnn, same frame throughout:
+
+    reference set                       detect     match      total
+    1 tile,   2048 ref kp               258.6      28.6       287.2
+    9 tiles, 13305 ref kp               233.8     112.0       345.9
+    25 tiles, 51200 ref kp              223.3     439.0       662.3
+
+**Re-baselined against the Pi table on matched geometry** -- one tile, 2048
+reference keypoints, p95 of 15 reps, which is the column the Pi table quotes
+(`python scripts/bench_matchers.py --tiles 1 --reps 15`):
+
+    matcher              Pi 5 p95    Xavier p95    Xavier is
+    orb                      56.6          96.6      1.71x slower
+    sift                     98.9         197.5      2.00x slower
+    akaze                   107.5         157.1      1.46x slower
+    xfeat_cpu / _mnn        161.6         291.9      1.81x slower
+    xfeat_lighterglue      2108.6        2655.9      1.26x slower
+
+So the Xavier is 1.3-2.0x slower than a Pi 5 across every matcher, not 10x.
+The ordering of the matchers is unchanged, so conclusions drawn from the Pi
+table about which matcher to use still hold on this board.
+
+Two things follow, and both were got wrong once already:
+
+- **The Pi table above was measured against a one-tile reference.** The replay
+  runs against `ref_tile__xfeat_mnn__*`, which is 25 tiles and 51200 keypoints.
+  Match cost is linear in reference keypoints, so the same board on the same
+  frame goes from 28.6 ms to 439 ms purely on search width. An apparent 10x
+  "the Xavier loses to a Pi" is mostly this, and is not a board result at all.
+  Compare like geometry or do not compare.
+- **On like geometry the Xavier is about 1.8x slower than the Pi 5**
+  (287 ms against 161.6 ms), and that gap is real. It is a per-core gap, not a
+  throughput one: this workload barely threads.
+
+      threads      detect     match(25 tiles)
+      1             301.6        637.3
+      8             240.3        407.1
+
+  8x the cores buys 1.26x on detection and 1.57x on matching. Carmel is a 2018
+  core and loses to the Pi 5's A76 per clock, so the Xavier's one advantage on
+  CPU -- eight cores instead of four -- is mostly unavailable here.
+
+### On ARM, XFeat is slower than SIFT -- on both boards
+
+XFeat's own README claims it is "faster than SIFT on CPU", and the paper's CPU
+result is qualified as "tested on laptop with an i5 CPU". That is an x86 result
+with AVX2 and MKL behind it. On ARM the ranking inverts, and our own two boards
+already agreed on this before anyone looked it up:
+
+    matcher     Pi 5 p95    Xavier p95
+    sift            98.9        197.5
+    xfeat_mnn      161.6        291.9      1.6x / 1.5x SLOWER than sift
+
+torch on this board reports `MKL not found` and falls back to OpenMP + oneDNN,
+while OpenCV's SIFT has hand-tuned NEON. The authors publish no embedded CPU
+timings at all -- only GPU figures (150+ FPS single-batch VGA, 1400 FPS batched
+on a 4090) and the i5 laptop claim -- so there is no published number for this
+class of hardware to be measured against. Ours is the baseline. XFeat is still
+worth keeping for robustness to viewpoint and illumination, which is what it
+actually buys over SIFT, but not for speed on a CPU-only ARM target.
+
+### The demo flight moves at 85.6 m/s -- do not tune latency against it
+
+`demo/flight.mp4` steps 21.41 m between frames at 4 fps: 1464 m of track over
+60 frames, about 308 km/h. It is a synthetic sweep across the reference tile,
+not a flight profile. This matters because `prior_radius_m` is sized against
+ground speed -- the config comment reasons "100 m at 20 m/s is 5 s" -- and on
+this feed the vehicle crosses 66 m during a single 0.77 s solve. Any search
+radius or `prior_max_age_s` validated on this feed is being validated against
+dynamics no small UAV has. Tune those two against a real profile, or against
+env80, and treat the synthetic feed as a wiring test only, which is what the
+dashboard banner already says it is.
+
+**The GPU is the unused lever, and it is the reason to have this board.** The
+512-core Volta sits at 1.377 GHz doing nothing: `methods.py::XFeatMethod._load`
+hardcodes `self._x.dev = torch.device("cpu")`, there is no device knob in any
+config, and `bootstrap.sh` installs from the PyTorch CPU index by design. The
+CUDA-build warning in `_load` is correct on x86 (a CUDA wheel there means pip
+resolved the wrong one) but wrong on a Jetson, where NVIDIA ships a real
+aarch64 CUDA wheel for JetPack 5. XFeat is a small CNN -- the detection half,
+which is now the floor at ~230 ms and is the part that will not thread, is
+exactly what a GPU fixes. Nothing below 250 ms is reachable on this board on
+CPU: even a one-tile search is 287 ms.
 
 ---
 
@@ -448,6 +547,40 @@ field has far more range than Eq. 7 can use.
     runs/<stamp>_<tag>/         one directory per session
 
 `python scripts/preflight.py` before trusting anything.
+
+---
+
+## Portability across boards
+
+Nothing in `geoanchor/` or `configs/` contains an absolute path, and it must
+stay that way. `config.REPO_ROOT` is derived from `__file__`, and
+`Config.resolve()` expands `~` and makes any relative path repo-relative, so
+the same checkout runs from `/data/geoanchor-rt` on one board and
+`/home/<someone>/GeoAnchor/geoanchor-rt` on another with no edit. A new
+`/home/<user>/...` or `/data/...` string in code or YAML is a bug, not a
+default -- put it in the config as a relative path, or behind an env var.
+
+What is per-board, and therefore gitignored and rebuilt rather than copied:
+`data` (a symlink to wherever the datasets landed on that machine), `stores/`
+(keyed by content hash, so a rebuild is safe), `runs/`, `.venv/`,
+`dashboard/out/`, `xfeat/`, `demo/`. `bootstrap.sh` is the once-per-board step
+that recreates the ones that can be recreated.
+
+**Absolute paths in a session are provenance, not a dependency.** `OL-16`
+prints `str(self.rec.session)` and `session.json`'s header carries `run_dir`,
+both absolute on the machine that produced them -- so a session exported from a
+laptop shows that laptop's `/home/<user>/...` in the Output layer card even when
+the dashboard displaying it is on a different host entirely. That is correct and
+worth keeping: it says which machine produced the numbers, which matters as soon
+as more than one board is in play. Do not "fix" it to a relative path, and never
+read it back as a path -- replay loads the file it was handed, never the
+directory the header names.
+
+Corollary for the dashboard: a dashboard on host A served by an API on host A
+shows host A's session, whatever code is checked out on host B. When a number on
+screen disagrees with the tree you are editing, confirm which API the page is
+talking to before believing either -- `/api/state` carries `board.arch` and
+`board.cores`, which is the fastest way to tell two hosts apart.
 
 ---
 

@@ -9,10 +9,12 @@ install to wheels that are known good on aarch64.
 from __future__ import annotations
 
 import math
+import warnings
 from functools import lru_cache
 
 WGS84 = 4326
 _EARTH_R = 6371008.8  # mean radius, metres
+_GEOD_WARNED = False
 
 
 def _spec(crs) -> str:
@@ -57,8 +59,18 @@ def crs_to_pixel(transform, x: float, y: float) -> tuple:
 
 
 def crs_to_wgs84(crs, x: float, y: float) -> tuple:
+    """(x, y) in the map's CRS -> (lat, lon). Note the order flip: x is EAST.
+
+    The shortcut below returns y, x and not x, y. A map already in WGS84 needs
+    no transform, but it still needs the same argument order as every other
+    branch: x is longitude and this function returns latitude first. Returning
+    x, y here put lat=151, lon=-33 into every position on a geographic basemap,
+    and it stayed hidden because wgs84_to_crs is correct in both branches, so a
+    round trip cancelled the error out. Reachable whenever the store's EPSG is
+    the integer 4326, which is what mapprep writes for a geographic GeoTIFF.
+    """
     if crs == WGS84:
-        return x, y
+        return y, x
     lon, lat = _transformer(crs, WGS84).transform(x, y)
     return lat, lon
 
@@ -96,7 +108,18 @@ def distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """
     try:
         return abs(_geod().inv(lon1, lat1, lon2, lat2)[2])
-    except Exception:
+    except Exception as exc:
+        # Falling back to the sphere silently would reintroduce exactly the
+        # 0.2% bias this function exists to avoid, and it would do it to a
+        # subset of rows rather than uniformly -- which is worse, because the
+        # table would then be internally inconsistent with nothing to show for
+        # it. Say so once per process instead of swallowing it.
+        global _GEOD_WARNED
+        if not _GEOD_WARNED:
+            _GEOD_WARNED = True
+            warnings.warn(f"pyproj.Geod unavailable ({exc}); distances fall back to a "
+                          "spherical haversine, which is biased by ~0.2%. Errors "
+                          "reported from this run are not exact.", RuntimeWarning)
         return haversine_m(lat1, lon1, lat2, lon2)
 
 

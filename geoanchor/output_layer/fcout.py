@@ -49,9 +49,15 @@ main repo already does that job for the constants it covers.
 """
 from __future__ import annotations
 
+import math
 import time
 
 from ..geo import ne_offset_m
+
+
+def _finite(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
 
 # Upper-triangle indices of the 6x6 pose covariance. ArduPilot reads exactly
 # these six entries and nothing else.
@@ -117,6 +123,7 @@ class FlightControllerLink:
         self.angle_var = float(angle_sigma_rad) ** 2
         self.reset_counter = 0
         self.sent = 0
+        self.rejected_nonfinite = 0
         self._origin_sent = False
         self._last_heartbeat = None
         if self.message not in ("ODOMETRY", "VISION_POSITION_ESTIMATE"):
@@ -168,11 +175,23 @@ class FlightControllerLink:
 
     def send(self, lat: float, lon: float, sigma_m: float, *, t_capture_unix: float = None,
              quality: int = 0, yaw_deg=None) -> bool:
-        if lat is None or lon is None:
+        # isfinite, not `is not None`. max(nan, 1e-3) returns nan, so the clamp
+        # below is not a guard against one -- NaN passes straight through every
+        # comparison it meets and lands in cov[0]. ArduPilot checks isnan(cov[0])
+        # and takes its NO-COVARIANCE branch, which does not assign posErr at
+        # all: EKF3 then fuses this position under whatever posErr it happened
+        # to hold last. Nothing raises, on either side. Refusing to send is the
+        # only safe answer, because a position without a trustworthy sigma is
+        # precisely what this project exists not to emit.
+        if not (_finite(lat) and _finite(lon) and _finite(sigma_m)):
+            self.rejected_nonfinite += 1
             return False
         olat, olon = self.ensure_origin(lat, lon)
         north, east = ne_offset_m(olat, olon, lat, lon)
         sigma = max(float(sigma_m), 1e-3)
+        if not _finite(north) or not _finite(east):
+            self.rejected_nonfinite += 1
+            return False
 
         # Zeros, not NaN. See the module docstring: ArduPilot sums the three
         # translational entries, so one NaN among them poisons posErr.

@@ -17,18 +17,28 @@ function pct(rows, q) {
   return lo === hi ? s[lo] : s[lo] + (s[hi] - s[lo]) * (pos - lo);
 }
 
+/** Numeric and finite. A NaN would not merely blank a cell: it does not compare
+ *  against anything, so it survives sort() wherever it started and drags every
+ *  percentile past it to the wrong row. Dropping it is the only safe reading. */
+const finite = (xs) => xs.filter((v) => typeof v === 'number' && Number.isFinite(v));
+
 export function summarise(records) {
-  const errs = records.map((r) => r.error_m).filter((v) => v !== null && v !== undefined);
-  const lat = records.map((r) => r.latency_ms).filter((v) => v !== null && v !== undefined);
-  const losses = records.map((r) => r.loss).filter((v) => v !== null && v !== undefined);
+  const errs = finite(records.map((r) => r.error_m));
+  const lat = finite(records.map((r) => r.latency_ms));
+  const losses = finite(records.map((r) => r.loss));
   const accepted = records.filter((r) => r.accepted).length;
   return {
     n: records.length,
     accepted,
-    errorRate: records.length ? 1 - accepted / records.length : null,
+    // ACCEPT rate, and deliberately not "error rate". A rejected fix is the
+    // gate doing its job -- CLAUDE.md's headline env80 result is a 20% accept
+    // rate that it calls honest -- so presenting the complement as an error
+    // would paint the system's correct behaviour as an 80% failure.
+    acceptRate: records.length ? accepted / records.length : null,
     median: pct(errs, 0.5),
     p90: pct(errs, 0.9),
     p99: pct(errs, 0.99),
+    scored: errs.length,
     within10: errs.length ? errs.filter((e) => e <= 10).length / errs.length : null,
     medLoss: pct(losses, 0.5),
     medLatency: pct(lat, 0.5),
@@ -38,12 +48,14 @@ export function summarise(records) {
 
 export default function Stats({ records, budgetMs = 250 }) {
   const s = summarise(records);
+  // The only cell with a right and a wrong side. Latency over budget is a real
+  // fault: ArduPilot does not reject a late fix, it stamps it as current and
+  // fuses it at the wrong time, so nothing downstream will complain either.
   const latencyTone = s.p95Latency == null ? '' : s.p95Latency > budgetMs ? 'bad' : 'good';
-  const errTone = s.errorRate == null ? '' : s.errorRate > 0.3 ? 'bad' : s.errorRate > 0.1 ? 'warn' : 'good';
 
   const cells = [
     { k: 'fixes', v: s.n, u: '' },
-    { k: 'error rate', v: s.errorRate == null ? '--' : (s.errorRate * 100).toFixed(1), u: '%', tone: errTone },
+    { k: 'accepted', v: s.acceptRate == null ? '--' : (s.acceptRate * 100).toFixed(1), u: '%' },
     { k: 'median error', v: fmt(s.median), u: 'm' },
     { k: 'p90 error', v: fmt(s.p90), u: 'm' },
     { k: 'p99 error', v: fmt(s.p99), u: 'm' },
@@ -57,7 +69,12 @@ export default function Stats({ records, budgetMs = 250 }) {
       <header>
         <h2>Session</h2>
         <span className="note" style={{ marginLeft: 'auto' }}>
-          median and percentiles only &mdash; no mean, no RMSE
+          {s.scored < s.n
+            /* Percentiles are over SCORED fixes, which is a smaller set than
+               the fix count beside them. Saying so stops the two being read as
+               one population. */
+            ? `median and percentiles over ${s.scored} scored of ${s.n} — no mean, no RMSE`
+            : 'median and percentiles only — no mean, no RMSE'}
         </span>
       </header>
       <div className="stats">

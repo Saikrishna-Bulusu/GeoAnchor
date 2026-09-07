@@ -1,0 +1,156 @@
+# Live USB camera through all three layers.
+#
+#     GEOANCHOR_CONFIG=configs/camera.yaml bash run.sh
+#
+# WHAT THIS IS FOR, AND WHAT IT CANNOT TELL YOU
+# ---------------------------------------------
+# This runs the real capture path -- a real camera, real V4L2, real timestamps
+# -- through the same three layers as a flight. That makes it the right rig for
+# the first open question in CLAUDE.md, OVERHEAD_MS: capture to the first byte
+# of the frame the matcher sees. `capture_age_ms` on every frame packet is the
+# capture half of it, measured from the frame's own V4L2 buffer timestamp
+# rather than assumed.
+#
+# It is NOT an accuracy test and no number out of it belongs in a table. The
+# camera is looking at whatever is in front of it, and the reference map is a
+# tile of Sydney, so there is no correspondence to find. Expect the matcher to
+# reject essentially every frame -- PLE-08, or the inlier gate -- and expect
+# that to be CORRECT behaviour rather than a fault. A fix that IS accepted here
+# is the thing worth investigating, because it is a false positive against a
+# reference the camera cannot possibly be seeing, and that is precisely the
+# rejection problem the project reports p99 for.
+#
+# Point the camera at a printed or on-screen crop of the reference tile and the
+# matcher will start solving. That is a genuine end-to-end test of the geodetic
+# path, but note it is the same picture-against-itself case as the Sydney demo
+# video, and CLAUDE.md's standing rule applies: it proves wiring, not accuracy.
+
+session:
+  tag: camera_live
+  runs_dir: runs
+
+bus:
+  data_pub:       ipc:///tmp/geoanchor/data.sock
+  processing_pub: ipc:///tmp/geoanchor/processing.sock
+  output_pub:     ipc:///tmp/geoanchor/output.sock
+  data_ctl:       ipc:///tmp/geoanchor/data.ctl
+  processing_ctl: ipc:///tmp/geoanchor/processing.ctl
+  output_ctl:     ipc:///tmp/geoanchor/output.ctl
+
+data_layer:
+  map:
+    source: data/sydney/ref_tile.tif
+    store_dir: stores
+    method: xfeat_mnn
+    tile_px: 1024
+    overlap_px: 128
+    max_keypoints: 2048
+    rebuild: false
+
+  feed:
+    type: uvc
+    # /dev/video0 on this Xavier is the Sonix 05a3:9230, whose own product
+    # string is "USB2.0_CAM1". Note that lsusb ALSO prints "USB2.0_CAM1" for a
+    # mass-storage device at 1908:0226 on this bus, from the USB ID database
+    # rather than from the hardware -- that one is a flash drive and has no
+    # video node at all. Confirm with the interface class before believing a
+    # name: `cat /sys/bus/usb/devices/*/bInterfaceClass` gives 0e for video,
+    # 08 for storage.
+    device: 0
+    width: 1280
+    height: 720
+    fourcc: MJPG           # see configs/system.yaml -- this is 30 fps vs 10 fps
+    fps: 30
+    frame_px: 512
+    jpeg_quality: 80
+    intrinsics:
+      # DELIBERATELY EMPTY. Without fx_px the preprocessor cannot scale the
+      # frame to the reference GSD, so it falls back to a fixed long edge and
+      # says so on every frame (DLE-13). That is the honest state until
+      # `python scripts/calibrate_camera.py` has been run against THIS camera
+      # -- CLAUDE.md open item 2, and explicitly not a number to take from a
+      # datasheet. Putting a plausible-looking fx here would make the warning
+      # go away without making the scale right.
+      fx_px: null
+      fy_px: null
+      cx_px: null
+      cy_px: null
+      dist: null
+
+  gps:
+    # There is no autopilot on the bench and no truth for a camera on a desk.
+    # `none` means fixes are logged and shown but never scored, which is the
+    # only honest option: pairing against a fabricated position would produce
+    # an error column that means nothing.
+    source: none
+    stale_after_s: 3.0
+
+  envelope:
+    # A camera on a bench is at no altitude at all, so the 50-100 m envelope
+    # would fire DLE-12 on every frame. Widened here so the log stays readable;
+    # this is a bench config and the cap still stands for anything airborne.
+    # Not zero: validate() requires 0 < min, and that guard is there for flight
+    # rather than for this, so the config bends and the check does not.
+    agl_min_m: 1
+    agl_max_m: 100
+
+# ---------------------------------------------------------------------------
+processing_layer:
+  method: xfeat_mnn
+  max_keypoints: 4096
+  min_keypoints: 30
+  min_matches: 12
+  inlier_gate: 25
+  ransac_reproj_px: 3.0
+  # No attitude source on the bench, so there is no yaw to rectify by and
+  # rectification would be a no-op rotation of zero. Left on so the code path
+  # is the same one a flight uses.
+  rectify: true
+  latency_budget_ms: 250
+  tile_ransac: true
+
+  search:
+    # Cold start every frame. With no GPS there is no prior to establish, so
+    # this searches the whole map -- which is also the slowest case, and
+    # therefore the right one for a latency measurement.
+    use_prior: false
+    prior_radius_m: 100
+    cold_start_max_tiles: 0
+
+  covariance:
+    backend: gate_only
+    fixed_sigma_m: 8.0
+    clamp_m: [0.1, 100.0]
+    model_path: null
+
+# ---------------------------------------------------------------------------
+output_layer:
+  pair_window_s: 0.5
+  loss: nll
+  alarm_error_m: 50.0
+  export:
+    flush_every: 20
+
+  fc:
+    # Nothing reaches a vehicle from a bench run. This is the shipped default
+    # and there is no reason to change it here.
+    enabled: false
+    loop_mode: "off"       # quoted: bare `off` is boolean False in YAML 1.1
+    firmware: ardupilot
+    controller: pixhawk6c
+    endpoint: udpout:127.0.0.1:14551
+    baud: 921600
+    message: ODOMETRY
+    min_quality_inliers: 40
+    require_no_device_errors: true
+
+  qgc:
+    enabled: false
+    endpoint: udpout:127.0.0.1:14550
+    system_id: 2
+    label: GeoAnchor
+
+api:
+  host: 0.0.0.0
+  port: 8000
+  cors_origins: ["*"]

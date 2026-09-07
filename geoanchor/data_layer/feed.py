@@ -123,43 +123,157 @@ class FileFeed(Feed):
 class UvcFeed(Feed):
     """Plain V4L2. No GStreamer, no Argus, no ISP -- the same capture code
     runs on the Xavier, the Pi 5 and a laptop, so a timing comparison between
-    boards is a comparison of the boards."""
+    boards is a comparison of the boards.
+
+    Two things here are load-bearing rather than tidy, both measured on the
+    Xavier against a Sonix USB2 camera on 4 Sept 2026.
+
+    THE PIXEL FORMAT IS NOT COSMETIC. UVC over USB 2.0 has about 480 Mbit/s to
+    play with, and uncompressed YUYV at 1280x720 needs more than that, so the
+    camera silently negotiates a slower frame rate instead of refusing: 30 fps
+    at 640x480, but 10 fps at 1280x720 and 5 fps at 1920x1080, with some modes
+    failing to read at all. The same camera in MJPG holds 30 fps all the way to
+    1920x1080. Asking for a resolution without asking for MJPG is how a feed
+    ends up at 5 fps with nothing in the logs to say so.
+
+    THE DRIVER QUEUE IS A LATENCY LEAK. V4L2 keeps filling its buffers while
+    the consumer is busy matching, and cv2.VideoCapture.read() returns the
+    OLDEST queued frame, not the newest. Measured with the frame's own V4L2
+    timestamp: a consumer that pauses 1 s is handed a frame 1758 ms old, and
+    even a consumer that never pauses is handed one 162 ms old. Stamping that
+    frame with time.time() on return -- which is what this class used to do --
+    reports it as current. CLAUDE.md is explicit that this is the expensive
+    failure: ArduPilot's writeExtNavData does MAX(timeStamp_ms,
+    imuDataDelayed.time_ms), so a late fix is not rejected, it is stamped as
+    current and fused at the wrong time, and at 5 m/s each 100 ms is 0.5 m.
+
+    So a reader thread drains the queue continuously and keeps only the newest
+    frame, exactly the drop-not-block rule bus.py already applies to messages,
+    and the frame is stamped with the V4L2 buffer timestamp rather than with
+    the time it happened to be collected. That bounds staleness at one frame
+    interval plus decode -- measured 41-52 ms regardless of consumer speed --
+    and, more to the point, whatever remains is now REPORTED instead of hidden.
+    """
     kind = "uvc"
 
-    def __init__(self, device=0, width: int = 1280, height: int = 720, fps: float = 30.0):
+    # The camera is dead, as opposed to merely slow, if nothing arrives in this
+    # long. Generous enough that a 5 fps mode does not trip it.
+    _DEAD_AFTER_S = 2.0
+
+    def __init__(self, device=0, width: int = 1280, height: int = 720, fps: float = 30.0,
+                 fourcc: str = "MJPG"):
+        import threading
+
         self.device = device
+        self.requested = (int(width), int(height), float(fps), str(fourcc or ""))
         node = f"/dev/video{device}" if isinstance(device, int) else str(device)
         if isinstance(device, int) and not Path(node).exists():
             raise FeedError("DLDE-01", f"{node} does not exist. `v4l2-ctl --list-devices` shows what is attached.")
         self.cap = cv2.VideoCapture(device if isinstance(device, int) else str(device), cv2.CAP_V4L2)
         if not self.cap.isOpened():
             raise FeedError("DLDE-02", f"cannot open {node} -- in use by another process, or no V4L2 support")
+
+        # Order matters: the format has to be set before the frame size, or the
+        # driver picks a size valid for the OLD format and then keeps it.
+        if fourcc:
+            self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*str(fourcc)))
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(width))
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(height))
         self.cap.set(cv2.CAP_PROP_FPS, float(fps))
-        # A driver buffer queue turns into latency the moment matching runs
-        # slower than capture, and that latency is invisible in the timestamp.
-        try:
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        except cv2.error:
-            pass
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)   # honoured or not, the thread is the real fix
+
+        ok, first = self.cap.read()
+        if not ok or first is None:
+            self.cap.release()
+            raise FeedError("DLDE-03", f"{node} opened but returned no frame. A mode the camera "
+                                       f"cannot actually deliver is the usual cause: "
+                                       f"{width}x{height} @{fps:g} {fourcc or 'default'}.")
+
+        # Read back what the driver ACTUALLY gave us. Asking is not getting, and
+        # a run whose logs claim 1280x720@30 while the camera does 640x480@10 is
+        # worse than one that admits it.
+        self.actual = {
+            "width": int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+            "height": int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+            "fps": float(self.cap.get(cv2.CAP_PROP_FPS)),
+            "fourcc": _fourcc_str(self.cap.get(cv2.CAP_PROP_FOURCC)),
+        }
+
         self.index = 0
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._latest = None          # (frame, t_unix, t_mono, age_ms_at_grab)
+        self._fail_streak = 0
+        self._thread = threading.Thread(target=self._pump, name="uvc-drain", daemon=True)
+        self._thread.start()
+
+    def _pump(self) -> None:
+        """Consume every frame the camera produces, keep the newest one."""
+        while not self._stop.is_set():
+            ok, frame = self.cap.read()
+            if not ok or frame is None:
+                self._fail_streak += 1
+                if self._stop.wait(0.01):
+                    break
+                continue
+            self._fail_streak = 0
+            t_mono, t_unix, age_ms = self._stamp()
+            with self._lock:
+                self._latest = (frame, t_unix, t_mono, age_ms)
+
+    def _stamp(self) -> tuple:
+        """When was this frame actually captured?
+
+        V4L2 timestamps the buffer on CLOCK_MONOTONIC and OpenCV surfaces it as
+        CAP_PROP_POS_MSEC, so capture time is knowable rather than guessable.
+        Not every driver fills it in, so an implausible value falls back to now
+        and says so instead of quietly emitting a nonsense timestamp.
+        """
+        now_mono, now_unix = time.monotonic(), time.time()
+        ts_ms = self.cap.get(cv2.CAP_PROP_POS_MSEC)
+        age_s = now_mono - (ts_ms / 1000.0) if ts_ms and ts_ms > 0 else None
+        if age_s is None or not (0.0 <= age_s <= 5.0):
+            return now_mono, now_unix, None          # None == driver gave us nothing usable
+        return now_mono - age_s, now_unix - age_s, age_s * 1000.0
 
     def read(self) -> tuple:
-        ok, frame = self.cap.read()
-        t = time.time()                       # stamp as close to capture as we can get
-        if not ok:
-            raise FeedError("DLDE-03", "camera stopped returning frames")
+        deadline = time.monotonic() + self._DEAD_AFTER_S
+        while True:
+            with self._lock:
+                latest, self._latest = self._latest, None
+            if latest is not None:
+                break
+            if not self._thread.is_alive() or time.monotonic() > deadline:
+                raise FeedError("DLDE-03", f"camera stopped returning frames "
+                                           f"({self._fail_streak} consecutive failed reads)")
+            time.sleep(0.002)
+
+        frame, t_unix, t_mono, age_ms = latest
         self.index += 1
-        return frame, t, {"frame_index": self.index}
+        meta = {"frame_index": self.index, "t_capture_mono": t_mono}
+        # Surface the queue delay rather than absorbing it: this is the capture
+        # half of OVERHEAD_MS, and it belongs in the record, not in a comment.
+        if age_ms is not None:
+            meta["capture_age_ms"] = round(age_ms, 1)
+        return frame, t_unix, meta
 
     def close(self) -> None:
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join(timeout=1.0)
         self.cap.release()
 
     def describe(self) -> dict:
-        return {"kind": "uvc", "device": str(self.device),
-                "width": int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                "height": int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}
+        rw, rh, rf, rc = self.requested
+        d = {"kind": "uvc", "device": str(self.device)}
+        d.update(self.actual)
+        # A camera that quietly gave us something other than what the config
+        # asked for is a thing to see on the dashboard, not to discover in a
+        # latency table three days later.
+        if (rw, rh) != (self.actual["width"], self.actual["height"]) or \
+           (rc and rc != self.actual["fourcc"]):
+            d["negotiated_down_from"] = f"{rw}x{rh} @{rf:g} {rc or 'default'}"
+        return d
 
 
 class RtspFeed(Feed):
@@ -267,7 +381,8 @@ def open_feed(cfg: dict) -> Feed:
                         sidecar=cfg.get("sidecar"), realtime=cfg.get("realtime", True))
     if kind == "uvc":
         return UvcFeed(cfg.get("device", 0), cfg.get("width", 1280),
-                       cfg.get("height", 720), cfg.get("fps", 30.0))
+                       cfg.get("height", 720), cfg.get("fps", 30.0),
+                       cfg.get("fourcc", "MJPG"))
     if kind == "rtsp":
         return RtspFeed(cfg["url"])
     if kind == "env80":
@@ -278,6 +393,15 @@ def open_feed(cfg: dict) -> Feed:
             agl_min=cfg.get("agl_min_m", 50.0), agl_max=cfg.get("agl_max_m", 100.0),
             view_angle_min=cfg.get("view_angle_min_deg", 80.0), limit=cfg.get("limit", 0))
     raise FeedError("DLE-01", f"unknown feed type '{kind}'")
+
+
+def _fourcc_str(value) -> str:
+    """Decode the packed FOURCC that V4L2 reports back into 'MJPG' etc."""
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        return ""
+    return "".join(chr((v >> (8 * i)) & 0xFF) for i in range(4)).strip("\x00 ")
 
 
 def _load_sidecar(path) -> list:

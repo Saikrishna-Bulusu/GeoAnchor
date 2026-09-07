@@ -103,10 +103,18 @@ def main() -> int:
         m = conn.recv_match(type="PARAM_VALUE", blocking=True, timeout=1)
         if m and m.param_id in WANT:
             got[m.param_id] = float(m.param_value)
-    problems = 0
+    problems, unknown = 0, 0
     for name, (why, ok) in WANT.items():
         if name not in got:
-            print(f"     ??   {name:16s} not reported -- may not exist on this firmware")
+            # NOT harmless. param_request_list streams every parameter on the
+            # vehicle, and over a serial link the ten we care about may simply
+            # not have arrived inside the timeout. "Did not arrive" and "does
+            # not exist" are indistinguishable from here, so this counts rather
+            # than shrugging: reporting success for a parameter never seen is
+            # how a misconfigured autopilot passes its own pre-flight check.
+            print(f"     ??   {name:16s} not reported -- absent on this firmware, or the "
+                  "parameter stream did not finish in time")
+            unknown += 1
             continue
         v = got[name]
         good = ok(v) if ok else True
@@ -115,6 +123,9 @@ def main() -> int:
     if problems:
         print(f"\n     {problems} parameter(s) wrong. Set them and reboot the autopilot "
               "before going further -- an ExternalNav fix is ignored silently otherwise.")
+    if unknown:
+        print(f"     {unknown} parameter(s) never reported. Re-run with a longer --timeout "
+              "before treating this as a pass.")
 
     print("\n3/4  waiting for a position to echo back")
     pos = None
@@ -155,6 +166,14 @@ def main() -> int:
     print("  * the origin agrees:        an ExternalNav position is LOCAL. If the EKF origin")
     print("                              and the origin used here differ, the offset is silent")
     print("                              and constant, and it is the most common way this fails")
+
+    # The exit code has to carry the verdict. This returned 0 unconditionally,
+    # so a wrong EK3_SRC1_POSXY printed "BAD" and still passed -- and anything
+    # gating on this script, a person included, read that as approval.
+    if problems or unknown:
+        print(f"\nFAILED: {problems} wrong, {unknown} unverified.")
+        return 1
+    print("\nAll checked parameters are correct.")
     return 0
 
 

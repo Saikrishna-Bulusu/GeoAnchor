@@ -19,13 +19,18 @@ const LAYERS = [
   { id: 'output', prefix: 'OL', name: 'Output' },
 ];
 
-export default function StepProgress({ layers }) {
-  const [registry, setRegistry] = useState(null);
+export default function StepProgress({ layers, codes }) {
+  const [fetched, setFetched] = useState(null);
 
   useEffect(() => {
-    getJSON('/api/codes').then(setRegistry).catch(() => {});
-  }, []);
+    // Only ask the board if the session did not bring the registry with it.
+    // Replaying an exported file has no board to ask, and this panel used to
+    // render nothing at all in that case.
+    if (codes?.length) return;
+    getJSON('/api/codes').then(setFetched).catch(() => {});
+  }, [codes]);
 
+  const registry = codes?.length ? codes : fetched;
   if (!registry) return null;
 
   return (

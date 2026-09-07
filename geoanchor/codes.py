@@ -90,6 +90,7 @@ PL = {
     "PL-16": "uncertainty estimated",
     "PL-17": "fix published",
     "PL-18": "layer stopped cleanly",
+    "PL-19": "data layer reported end of feed -- link watchdog stood down",
 }
 PLE = {
     "PLE-01": "no map packet yet -- waiting, not failing",
@@ -106,6 +107,8 @@ PLE = {
     "PLE-12": "no attitude available -- rectification skipped, matcher sees rotation",
     "PLE-13": "frame processing raised an unhandled error -- frame skipped, layer alive",
     "PLE-14": "method and feature store disagree -- store rebuilt with the wrong descriptor",
+    "PLE-15": "prior lies outside the reference map -- prior dropped, next frame searches cold",
+    "PLE-16": "prior is older than the configured max age -- dropped, searching cold",
 }
 PLDE = {
     "PLDE-01": "cannot connect to the data layer endpoint",
@@ -160,7 +163,30 @@ OLDE = {
     "OLDE-07": "QGroundControl endpoint unreachable -- display only, flight unaffected",
 }
 
+_TABLES = (("DL", DL), ("DLE", DLE), ("DLDE", DLDE), ("PL", PL), ("PLE", PLE),
+           ("PLDE", PLDE), ("OL", OL), ("OLE", OLE), ("OLDE", OLDE))
+
 REGISTRY: dict[str, str] = {**DL, **DLE, **DLDE, **PL, **PLE, **PLDE, **OL, **OLE, **OLDE}
+
+
+def _duplicates() -> list[str]:
+    """Codes defined more than once, across all nine tables.
+
+    This cannot be found by inspecting REGISTRY: ** merging collapses a repeat
+    at construction time and the later definition silently wins, so the merged
+    dict is simply one entry shorter and validate() sees nothing wrong. The
+    registry is append-only precisely because old session files carry these
+    strings, and a code that quietly changed meaning rewrites the history of
+    every run that used it -- so the check has to happen before the merge.
+    """
+    seen, dupes = {}, []
+    for table_name, table in _TABLES:
+        for code in table:
+            if code in seen:
+                dupes.append(f"{code}: defined in both {seen[code]} and {table_name}")
+            else:
+                seen[code] = table_name
+    return dupes
 
 _LAYER_OF = {"DL": "data", "PL": "processing", "OL": "output"}
 
@@ -185,7 +211,7 @@ def layer(code: str) -> str:
 
 def validate() -> list[str]:
     """Return the list of problems with the registry. Empty means healthy."""
-    bad = []
+    bad = _duplicates()
     for c in REGISTRY:
         head, _, num = c.partition("-")
         if not num.isdigit() or len(num) != 2:

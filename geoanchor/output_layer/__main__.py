@@ -18,6 +18,7 @@ import time
 from collections import deque
 from pathlib import Path
 
+from .. import codes as C
 from .. import config as cfgmod
 from .. import contracts as K
 from .. import device
@@ -26,7 +27,7 @@ from ..contracts import RecordPacket, StatusPacket, to_dict
 from ..logbus import LayerLog, resolve_run_dir
 from . import metrics
 from .fcout import FcError, FlightControllerLink, QgcLink, quality_from
-from .recorder import Recorder
+from .recorder import Recorder, basemap_data_uri
 
 LAYER = "output"
 STATUS_S = 1.0
@@ -98,8 +99,17 @@ class OutputLayer:
             header["warnings"].append(
                 "Frames were cut from the same image used as the reference map. This session "
                 "proves the pipeline is wired correctly and is NOT an accuracy result.")
+        ex = self.cfg.section("output_layer").get("export", {}) or {}
         self.rec = Recorder(self.run_dir, header,
-                            flush_every=self.cfg.get("output_layer.export.flush_every", 20))
+                            flush_every=ex.get("flush_every", 20),
+                            include_logs=ex.get("include_logs", True),
+                            max_log_rows=ex.get("max_log_rows", 4000))
+        # The step-code registry travels with the session. It is 113 short rows,
+        # and without it the replayed "steps completed" view has nothing to name
+        # the codes it is drawing -- it would have to ask a board that is not
+        # there.
+        self.rec.set_extra("codes", [{"code": c, "kind": C.kind(c), "layer": C.layer(c),
+                                      "description": d} for c, d in C.REGISTRY.items()])
         self.log.step("OL-06", str(self.rec.jsonl))
         self.open_fc()
         self.open_qgc()
@@ -158,11 +168,31 @@ class OutputLayer:
                             "Coordinates are a declared anchor plus a true metric offset, not "
                             "real positions: this dataset's ground truth is scene-local. Every "
                             "distance and therefore every error is exact.")
+                    first_map = self.map_info is None
                     self.map_info = header
+                    if self.rec is not None and first_map:
+                        # Carry the georeference, and the tile itself, into the
+                        # export. A replayed session otherwise draws its tracks
+                        # against nothing: the map packet lives only on the bus,
+                        # and the basemap image only on the board.
+                        self.rec.set_extra("map", header)
+                        if (self.cfg.section("output_layer").get("export", {}) or {}) \
+                                .get("embed_basemap", True):
+                            uri = basemap_data_uri(header.get("store_path"))
+                            if uri:
+                                self.rec.set_extra("basemap", uri)
+                            else:
+                                self.log.step("OL-16", "no basemap embedded; replay will draw "
+                                                       "tracks on a blank ground")
                 elif topic == K.T_STATUS:
                     de = (header.get("config") or {}).get("device_errors") or []
                     if de:
                         self._upstream_device_errors = sorted(set(self._upstream_device_errors) | set(de))
+                    # Keep the newest status per layer so the exported session
+                    # can show the layer cards and the steps-completed view,
+                    # both of which read counts.seen off exactly this packet.
+                    if self.rec is not None and header.get("layer"):
+                        self.rec.layers[header["layer"]] = header
                 elif topic == K.T_FIX:
                     self.on_fix(header)
             now = time.monotonic()
@@ -345,6 +375,11 @@ class OutputLayer:
                 "upstream_device_errors": self._upstream_device_errors,
             })
         self.pub.send(K.T_STATUS, to_dict(st))
+        # This layer does not subscribe to its own bus, so its card would be the
+        # one missing from its own export. Record it here alongside the two it
+        # hears from upstream.
+        if self.rec is not None:
+            self.rec.layers[LAYER] = to_dict(st)
         self._last_status = time.monotonic()
 
     def handle_commands(self) -> None:

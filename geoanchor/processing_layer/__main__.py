@@ -54,6 +54,8 @@ class ProcessingLayer:
         self._rate_window: list = []
         self._skipped = 0
         self._last_rx = time.monotonic()
+        self._feed_ended = False
+        self._cold_sweeps = 0
         self._hot_since = None
 
         try:
@@ -67,7 +69,9 @@ class ProcessingLayer:
             raise SystemExit(3)
         self.log = LayerLog(LAYER, run_dir, self.pub)
         self.ctl = CommandServer(cfg.get("bus.processing_ctl", "ipc:///tmp/geoanchor/processing.ctl"))
-        self.sub = Subscriber([cfg.get("bus.data_pub")], [K.T_MAP, K.T_FRAME])
+        # T_LOG is subscribed for exactly one thing -- hearing the data layer say
+        # its feed is finished. See note_data_log; it is not a liveness signal.
+        self.sub = Subscriber([cfg.get("bus.data_pub")], [K.T_MAP, K.T_FRAME, K.T_LOG])
         self.rect = Rectifier(enabled=bool(cfg.get("processing_layer.rectify", True)))
         self.cov = cov.build(cfg.section("processing_layer").get("covariance", {}))
 
@@ -138,15 +142,45 @@ class ProcessingLayer:
                                f"{manifest['gsd_m_px']:.4f} m/px")
         self.log.step("PL-08", "ready")
 
+    # A finite feed ends: 60 frames of replay, or a file that runs out. From
+    # that moment silence is the expected state rather than a broken link, but
+    # ZeroMQ cannot tell the two apart -- so without this the watchdog reports
+    # "cannot connect to the data layer endpoint" every 30 s for as long as the
+    # process is left up, which on a replay run is nearly the whole session and
+    # buries any real device error under a rising count of false ones.
+    #
+    # The data layer already announces it on the bus. This listens rather than
+    # inferring, because inferring is what got it wrong in the first place.
+    def note_data_log(self, row: dict) -> None:
+        if self._feed_ended or row.get("layer") != "data":
+            return
+        if row.get("code") in ("DL-19", "DL-20"):
+            self._feed_ended = True
+            # Standing down is not the same as never having faulted, but a
+            # finished feed is not a fault at all, so the code is cleared and
+            # the layer card goes back to green.
+            self.log.clear_device_error("PLDE-01")
+            self.log.step("PL-19", f"data layer reported {row.get('code')} -- "
+                                   "link watchdog stood down until frames resume")
+
     # -- the loop ----------------------------------------------------------
     def run(self) -> int:
         self.start()
         while self.running:
             self.handle_commands()
             msgs, dropped = self.sub.drain(200, keep_latest_of=[K.T_FRAME])
-            if msgs:
+            # Liveness is a question about frames, not about chatter. Counting
+            # log packets here would let a data layer that is still talking but
+            # has stopped publishing frames look healthy, which is the stall
+            # this watchdog exists to catch.
+            if any(topic in (K.T_FRAME, K.T_MAP) for topic, _, _ in msgs):
                 self._last_rx = time.monotonic()
-            elif time.monotonic() - self._last_rx > 15.0:
+                if self._feed_ended:
+                    # A looping feed came round, or the data layer was
+                    # restarted. Either way the stand-down no longer applies.
+                    self._feed_ended = False
+                    self.log.step("PL-19", "frames resumed -- link watchdog armed again")
+            elif not self._feed_ended and time.monotonic() - self._last_rx > 15.0:
                 # ZeroMQ connect() never fails loudly -- a wrong endpoint or a
                 # dead publisher looks exactly like an idle one. Silence past
                 # the point where a running data layer would have said
@@ -159,7 +193,9 @@ class ProcessingLayer:
                 self.log.throttled("PLE-10", 10.0, f"{dropped} stale frames dropped",
                                    total_skipped=self._skipped)
             for topic, header, payload in msgs:
-                if topic == K.T_MAP:
+                if topic == K.T_LOG:
+                    self.note_data_log(header)
+                elif topic == K.T_MAP:
                     self.attach_map(header)
                 elif topic == K.T_FRAME and not self.paused:
                     try:
@@ -214,11 +250,50 @@ class ProcessingLayer:
         search = pl.get("search", {})
         prior_lat = prior_lon = None
         if search.get("use_prior", True) and self.prior:
-            prior_lat, prior_lon, _ = self.prior
+            # A PRIOR HAS A SHELF LIFE. It bounds where the vehicle can be only
+            # because the vehicle was there recently; the timestamp was being
+            # unpacked and thrown away, so a prior stayed authoritative forever.
+            # That is the failure mode that bites hardest when matching is
+            # already struggling: one accepted fix, then a run of failures while
+            # the aircraft keeps flying, and every later frame is searched
+            # against a position it has long left. Nothing recovers, because
+            # only an accepted fix refreshes the prior and the prior is why they
+            # stop being accepted.
+            #
+            # The bound is geometric: the prior is worth trusting while the
+            # vehicle cannot yet have left the circle being searched, i.e. for
+            # about prior_radius_m / max ground speed. 100 m at 20 m/s is 5 s.
+            max_age = float(search.get("prior_max_age_s", 5.0) or 0.0)
+            age = K.now_unix() - self.prior[2]
+            if max_age > 0 and age > max_age:
+                self.prior = None
+                self.log.throttled("PLE-16", 10.0,
+                                   f"prior is {age:.1f}s old (max {max_age:.1f}s)",
+                                   dropped=True)
+            else:
+                prior_lat, prior_lon, _ = self.prior
+
+        def _prior_missed(plat, plon, col, row):
+            # Drop it. Keeping a prior that covers no tile means consulting the
+            # same wrong position on every subsequent frame, which is how the
+            # solver latches out of a map it is still flying over.
+            self.prior = None
+            self.log.throttled("PLE-15", 10.0,
+                               f"prior {plat:.6f}, {plon:.6f} maps to pixel "
+                               f"({col:.0f}, {row:.0f}), which covers no tile",
+                               dropped=True)
+
         keys = select_tiles(self.store, self.manifest, prior_lat, prior_lon,
                             radius_m=search.get("prior_radius_m", 150.0),
                             footprint_px=max(rect.shape[:2]),
-                            cold_start_max_tiles=search.get("cold_start_max_tiles", 0))
+                            cold_start_max_tiles=search.get("cold_start_max_tiles", 0),
+                            cold_start_offset=self._cold_sweeps,
+                            on_prior_miss=_prior_missed)
+        if prior_lat is None or self.prior is None:
+            # This frame searched cold -- either there was no prior, or the
+            # prior missed and was dropped. Either way the next cold frame
+            # starts where this one left off rather than repeating the window.
+            self._cold_sweeps += 1
         self.log.throttled("PL-11", 30.0, f"{len(keys)}/{self.manifest['n_tiles']} tiles",
                            prior="yes" if prior_lat else "cold")
 

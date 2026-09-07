@@ -46,6 +46,33 @@ MAX_LOGS = 400
 MAX_RECORDS = 5000
 
 
+def _frame_summary(header: dict) -> dict:
+    """The frame fields the dashboard reads, in ONE shape.
+
+    The incremental push and the connect-time snapshot both describe the same
+    frame, so they have to describe it identically. They did not: the push sent
+    w/h while the snapshot passed the raw packet through with width/height, and
+    a panel can only read one of those. The symptom is a camera caption reading
+    "undefinedxundefined" until the next frame happens to arrive -- permanently,
+    if the feed has already ended.
+    """
+    if not header:
+        return None
+    return {
+        "seq": header.get("seq"),
+        "t": header.get("t_capture_unix"),
+        "w": header.get("width"),
+        "h": header.get("height"),
+        "source_w": header.get("source_width"),
+        "source_h": header.get("source_height"),
+        "capture_age_ms": header.get("capture_age_ms"),
+        "preprocess_ms": header.get("preprocess_ms"),
+        "feed": header.get("feed"),
+        "altitude_m": header.get("altitude_m"),
+        "yaw_deg": header.get("yaw_deg"),
+    }
+
+
 class Hub:
     """Owns the bus connection and every buffer the dashboard reads."""
 
@@ -99,10 +126,7 @@ class Hub:
                 push = ("record", header)
             elif topic == K.T_FRAME:
                 self.frame_jpeg, self.frame_header = payload, header
-                push = ("frame", {"seq": header["seq"], "t": header["t_capture_unix"],
-                                  "w": header["width"], "h": header["height"],
-                                  "altitude_m": header.get("altitude_m"),
-                                  "yaw_deg": header.get("yaw_deg")})
+                push = ("frame", _frame_summary(header))
             elif topic == K.T_MAP:
                 self.map = header
                 push = ("map", header)
@@ -140,7 +164,7 @@ class Hub:
                 "logs": list(self.logs)[-120:],
                 "records": list(self.records)[-600:],
                 "fixes": list(self.fixes)[-60:],
-                "frame": self.frame_header,
+                "frame": _frame_summary(self.frame_header),
                 "board": device.summary(),
                 "codes": {"total": len(C.REGISTRY)},
                 "config": self.cfg.snapshot(),

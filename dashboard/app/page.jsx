@@ -15,7 +15,7 @@ const DEFAULT_MODE = process.env.NEXT_PUBLIC_GEOANCHOR_MODE || 'live';
 
 export default function Page() {
   const [mode, setMode] = useState(DEFAULT_MODE);
-  const { state, connected, error, loadSession } = useTelemetry(mode);
+  const { state, connected, error, loadSession, reset } = useTelemetry(mode);
   const [methods, setMethods] = useState(null);
   const [dragging, setDragging] = useState(false);
   const [runs, setRuns] = useState([]);
@@ -26,6 +26,17 @@ export default function Page() {
     getJSON('/api/methods').then(setMethods).catch(() => {});
     getJSON('/api/runs').then(setRuns).catch(() => {});
   }, [mode, connected]);
+
+  // Staleness is a function of elapsed time, not of arriving messages, so
+  // something has to re-render when nothing is happening. Without this a layer
+  // that dies while the others are also quiet keeps its last colour: the panel
+  // is only repainted by the very traffic whose absence it is meant to report.
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (mode !== 'live') return undefined;
+    const h = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(h);
+  }, [mode]);
 
   const records = state.records || [];
   const budget = state.config?.processing_layer?.latency_budget_ms ?? 250;
@@ -40,6 +51,16 @@ export default function Page() {
       alert(`not a GeoAnchor session file: ${e.message}`);
     }
   }, [loadSession]);
+
+  // Clearing before the switch is the whole fix: `records` outliving a
+  // live -> replay switch left the panel below unrendered, so replay mode
+  // showed live data and offered no way to open a file. Going the other way it
+  // drops the replayed session rather than leaving it up until the first
+  // snapshot lands.
+  const toggleMode = useCallback(() => {
+    reset();
+    setMode((m) => (m === 'live' ? 'replay' : 'live'));
+  }, [reset]);
 
   const onDrop = useCallback((e) => {
     e.preventDefault(); setDragging(false);
@@ -71,7 +92,14 @@ export default function Page() {
         </div>
         <span className="spacer" />
         <span className="mode"><span className={`dot ${status.tone}`} />{status.label}</span>
-        <button className="btn" onClick={() => setMode(mode === 'live' ? 'replay' : 'live')}>
+        {/* Only while a session is actually on screen. Clearing it without
+            leaving replay mode is what re-renders the picker below, so this is
+            the direct route to a second file -- the alternative is a round
+            trip out to live and back, which needs a reachable board. */}
+        {mode === 'replay' && state.replay && (
+          <button className="btn" onClick={reset}>Load another</button>
+        )}
+        <button className="btn" onClick={toggleMode}>
           {mode === 'live' ? 'Replay a session' : 'Back to live'}
         </button>
         <button className="btn primary" onClick={exportNow} disabled={!records.length}>
@@ -91,7 +119,7 @@ export default function Page() {
         </div>
       )}
 
-      {mode === 'replay' && !records.length && (
+      {mode === 'replay' && !state.replay && (
         <div className="panel" style={{ marginBottom: 14 }}>
           <header><h2>Replay</h2></header>
           <div className="body">
@@ -124,17 +152,25 @@ export default function Page() {
         </div>
       )}
 
-      {mode === 'live' && <LayerCards layers={state.layers} logs={state.logs} />}
+      {/* Shown in replay too. The step codes are the operational record of a
+          flight -- which layer got how far, which faults fired -- and a system
+          flown GNSS- and internet-denied is reviewed almost entirely from the
+          file afterwards, which is exactly when these used to disappear. */}
+      {Object.keys(state.layers || {}).length > 0 && (
+        <>
+          <LayerCards layers={state.layers} logs={state.logs}
+                      clockOffset={state.clockOffset} replay={state.replay} />
+          <div style={{ height: 14 }} />
+          <StepProgress layers={state.layers} codes={state.codes} />
+          <div style={{ height: 14 }} />
+        </>
+      )}
 
-      {mode === 'live' && <div style={{ height: 14 }} />}
-      {mode === 'live' && <StepProgress layers={state.layers} />}
-
-      <div style={{ height: 14 }} />
       <Stats records={records} budgetMs={budget} />
 
       <div style={{ height: 14 }} />
       <div className="grid main">
-        <MapView map={state.map} records={records} />
+        <MapView map={state.map} records={records} basemap={state.basemap} />
         <div className="grid" style={{ gap: 14 }}>
           {mode === 'live' && <CameraView frame={state.frame} />}
           {mode === 'live' && (

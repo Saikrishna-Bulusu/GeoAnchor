@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { apiBase, projectToPreview } from '@/lib/api';
 
 /**
@@ -12,44 +12,70 @@ import { apiBase, projectToPreview } from '@/lib/api';
  * when it is needed. The preview also shares the store's geotransform, so a
  * position drawn here is drawn against the same pixels the matcher used.
  */
-export default function MapView({ map, records, follow = true }) {
+function MapView({ map, records, basemap }) {
   const canvas = useRef(null);
   const [img, setImg] = useState(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    if (!map) return;
+    if (!map) {
+      // Dropping the session drops the basemap with it. Keeping the old image
+      // means the next session flashes the previous flight's map before its
+      // own loads.
+      setImg(null);
+      setFailed(false);
+      return;
+    }
     const im = new Image();
     im.crossOrigin = 'anonymous';
     im.onload = () => { setImg(im); setFailed(false); };
     im.onerror = () => setFailed(true);
-    im.src = apiBase() + '/api/map.png';
-  }, [map]);
+    // A session carries its own tile as a data URI, so a replay draws the real
+    // map with no board and no network. Only fall back to asking the API when
+    // there is no embedded one -- i.e. when we are live.
+    im.src = basemap || (apiBase() + '/api/map.png');
+  }, [map, basemap]);
 
-  useEffect(() => {
+  const draw = useCallback(() => {
     const cv = canvas.current;
-    if (!cv || !map) return;
+    if (!cv) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const box = cv.getBoundingClientRect();
     cv.width = Math.max(1, Math.round(box.width * dpr));
     cv.height = Math.max(1, Math.round(box.height * dpr));
     const g = cv.getContext('2d');
     g.clearRect(0, 0, cv.width, cv.height);
+    // Bail out AFTER clearing, never before: returning early left the previous
+    // session's track painted under a header that already said "no map".
+    if (!map) return;
 
     const W = cv.width, H = cv.height;
+    g.fillStyle = '#1b232e';
+    g.fillRect(0, 0, W, H);
+
+    // Fit the tile into the panel WITHOUT distorting it. Stretching to the box
+    // is not just ugly: it gives the map two different scales, and a confidence
+    // circle drawn in metres then has no single radius that is correct in both
+    // axes. Letterboxing keeps metres-per-pixel isotropic, which is what makes
+    // the sigma ring below an honest shape rather than a decorative one.
+    const mw = map.width > 0 ? map.width : (img ? img.width : W);
+    const mh = map.height > 0 ? map.height : (img ? img.height : H);
+    const fit = Math.min(W / mw, H / mh);
+    const dw = mw * fit, dh = mh * fit;
+    const ox = (W - dw) / 2, oy = (H - dh) / 2;
+
     if (img) {
-      g.drawImage(img, 0, 0, W, H);
+      g.drawImage(img, ox, oy, dw, dh);
       g.fillStyle = 'rgba(0,0,0,0.30)';
-      g.fillRect(0, 0, W, H);
-    } else {
-      g.fillStyle = '#1b232e';
-      g.fillRect(0, 0, W, H);
+      g.fillRect(ox, oy, dw, dh);
     }
 
     const P = (lat, lon) => {
       const p = projectToPreview(map.bounds_wgs84, lat, lon);
-      return p ? { x: p.x * W, y: p.y * H } : null;
+      return p ? { x: ox + p.x * dw, y: oy + p.y * dh } : null;
     };
+    // Device pixels per metre on the ground. Isotropic, because of the fit above.
+    const pxPerMetre = map.gsd_m_px ? dw / (mw * map.gsd_m_px) : null;
 
     const rows = records || [];
     const track = (key) => rows.map((r) => r[key]).filter(Boolean).map((p) => P(p.lat, p.lon)).filter(Boolean);
@@ -84,11 +110,14 @@ export default function MapView({ map, records, follow = true }) {
     if (last) {
       const drawMarker = (p, colour, radius, sigma) => {
         if (!p) return;
-        if (sigma && map.gsd_m_px) {
+        if (sigma && pxPerMetre) {
           // Confidence circle, in real metres, from the emitted covariance.
-          const mPerPxX = (map.width * map.gsd_m_px) / W;
+          // No dpr factor here: pxPerMetre is already device pixels per metre,
+          // because dw is in device pixels. Multiplying by dpr as well drew
+          // this ring at twice its true radius on every HiDPI screen --
+          // overstating the uncertainty the project exists to state correctly.
           g.beginPath();
-          g.arc(p.x, p.y, (sigma / mPerPxX) * dpr, 0, Math.PI * 2);
+          g.arc(p.x, p.y, sigma * pxPerMetre, 0, Math.PI * 2);
           g.fillStyle = 'rgba(76,154,255,0.14)';
           g.strokeStyle = 'rgba(76,154,255,0.5)';
           g.lineWidth = 1 * dpr;
@@ -103,6 +132,20 @@ export default function MapView({ map, records, follow = true }) {
       drawMarker(last.actual_gps && P(last.actual_gps.lat, last.actual_gps.lon), '#3fb950', 4);
     }
   }, [img, map, records]);
+
+  useEffect(() => { draw(); }, [draw]);
+
+  // The canvas backing store is sized from the element's box, so a layout
+  // change invalidates it. Without this the map stays at its old resolution --
+  // stretched or clipped -- until the next record happens to arrive, which on a
+  // finished session is never.
+  useEffect(() => {
+    const cv = canvas.current;
+    if (!cv || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(() => draw());
+    ro.observe(cv);
+    return () => ro.disconnect();
+  }, [draw]);
 
   return (
     <div className="panel">
@@ -129,3 +172,5 @@ export default function MapView({ map, records, follow = true }) {
     </div>
   );
 }
+
+export default memo(MapView);

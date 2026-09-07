@@ -49,23 +49,56 @@ class SolveResult:
 
 
 def select_tiles(store, manifest, prior_lat=None, prior_lon=None, radius_m=150.0,
-                 footprint_px=0.0, cold_start_max_tiles=0) -> list:
+                 footprint_px=0.0, cold_start_max_tiles=0, cold_start_offset=0,
+                 on_prior_miss=None) -> list:
     """Search-space reduction. The single cheapest speed-up available.
 
     A previous fix bounds where the vehicle can now be, so only the tiles that
     could contain the current footprint are candidates. With no prior there is
     nothing to bound it with and the whole map is searched, which is slow and
     is reported honestly rather than hidden.
+
+    A prior that covers NO tile is a different thing from having no prior, and
+    the two used to collapse into the same silent `keys or all_tile_keys()`.
+    They deserve different handling: the vehicle cannot be somewhere the map
+    does not cover, so an empty cover means the prior itself is wrong -- stale,
+    or from a solve that landed off-map. Widening back to the whole map is the
+    right recovery, but doing it quietly means the same bad prior is consulted
+    again on the very next frame, and every frame after, because nothing ever
+    replaces it. That is the failure the review found: one bad prior latches the
+    solver into a search region the vehicle has left, and it cannot recover
+    without a manual reset.
+
+    So the widening is kept and the miss is REPORTED, via on_prior_miss, so the
+    caller can drop the prior and genuinely start cold rather than repeat this.
+    The cold-start cap is applied here too -- this is a cold start now, and
+    ignoring the cap was how a whole-map search slipped past a configured limit.
     """
-    if prior_lat is None or prior_lon is None:
+    def _cold() -> list:
         keys = store.all_tile_keys()
-        if cold_start_max_tiles and len(keys) > cold_start_max_tiles:
-            return keys[:cold_start_max_tiles]
-        return keys
+        if not cold_start_max_tiles or len(keys) <= cold_start_max_tiles:
+            return keys
+        # The cap has to SWEEP, not truncate. all_tile_keys() is in manifest
+        # order, so `keys[:n]` searches one corner of the map on every cold
+        # frame -- and a vehicle anywhere else is then never found, silently and
+        # for ever, because nothing about a cold start ever moves the window.
+        # Rotating by the caller's counter costs nothing and bounds the miss:
+        # the whole map is covered every ceil(len(keys)/n) cold frames instead
+        # of never.
+        n = cold_start_max_tiles
+        start = (cold_start_offset * n) % len(keys)
+        return [keys[(start + i) % len(keys)] for i in range(n)]
+
+    if prior_lat is None or prior_lon is None:
+        return _cold()
     col, row = wgs84_to_pixel(manifest["transform"], manifest_crs(manifest), prior_lat, prior_lon)
     radius_px = radius_m / manifest["gsd_m_px"] + footprint_px / 2.0
     keys = store.tiles_covering(col, row, radius_px)
-    return keys or store.all_tile_keys()
+    if keys:
+        return keys
+    if on_prior_miss is not None:
+        on_prior_miss(prior_lat, prior_lon, col, row)
+    return _cold()
 
 
 def _tile_of(manifest: dict, tile_keys, pts: np.ndarray) -> dict:

@@ -61,9 +61,15 @@ def compute_loss(kind: str, error_m, sigma_m):
 
 
 def _percentile(values: list, q: float):
-    if not values:
+    # Drop non-finite values BEFORE sorting. A NaN does not compare true against
+    # anything, so sorted() leaves it wherever it started rather than pushing it
+    # to an end: the result is not a NaN median that announces itself, it is a
+    # median silently taken from the wrong row, with every percentile past that
+    # point shifted too. Dropping is the only defensible reading -- a fix whose
+    # error is NaN has no position on the distribution.
+    s = sorted(v for v in values if isinstance(v, (int, float)) and math.isfinite(v))
+    if not s:
         return None
-    s = sorted(values)
     if len(s) == 1:
         return s[0]
     pos = (len(s) - 1) * q
@@ -84,21 +90,30 @@ class Running:
         self.n_accepted = 0
         self.n_scored = 0
         self.n_unpaired = 0
+        self.n_nonfinite = 0
 
     def add(self, *, accepted: bool, error_m=None, loss=None, sigma_m=None, latency_ms=None):
         self.n_fix += 1
         if accepted:
             self.n_accepted += 1
-        if latency_ms is not None:
+        if _finite(latency_ms):
             self.latencies.append(float(latency_ms))
         if error_m is None:
             self.n_unpaired += 1
             return
+        if not _finite(error_m):
+            # Keep NaN and inf out of the distributions entirely rather than
+            # filtering them at every read. A non-finite error is not a large
+            # error -- it is the absence of one -- and letting it into the list
+            # corrupts sorted(), max() and the within-band denominators in three
+            # different ways. Counted so it is visible rather than discarded.
+            self.n_nonfinite += 1
+            return
         self.n_scored += 1
         self.errors.append(float(error_m))
-        if loss is not None:
+        if _finite(loss):
             self.losses.append(float(loss))
-        if sigma_m is not None:
+        if _finite(sigma_m):
             self.sigmas.append(float(sigma_m))
 
     @property
@@ -118,6 +133,7 @@ class Running:
             "n_accepted": self.n_accepted,
             "n_scored": self.n_scored,
             "n_unpaired": self.n_unpaired,
+            "n_nonfinite": self.n_nonfinite,
             "accept_rate": round(self.n_accepted / self.n_fix, 4) if self.n_fix else None,
             "error_rate": round(self.error_rate, 4) if self.error_rate is not None else None,
             "median_error_m": _round(_percentile(e, 0.50)),
@@ -134,6 +150,10 @@ class Running:
             key = f"within_{int(b)}m"
             out[key] = round(sum(1 for x in e if x <= b) / len(e), 4) if e else None
         return out
+
+
+def _finite(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
 
 def _round(v, nd: int = 3):

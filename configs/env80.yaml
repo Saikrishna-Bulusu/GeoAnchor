@@ -82,6 +82,7 @@ processing_layer:
   latency_budget_ms: 250
   search:
     use_prior: true
+    prior_max_age_s: 5.0   # see configs/system.yaml -- a prior has a shelf life
     prior_radius_m: 120
     cold_start_max_tiles: 0
   covariance:

@@ -43,6 +43,12 @@ data_layer:
     device: 0              # uvc: /dev/videoN
     width: 1280
     height: 720
+    # MJPG is not a preference, it is the difference between 30 fps and 5 fps.
+    # UVC over USB 2.0 cannot carry uncompressed YUYV at these sizes, and the
+    # camera responds by dropping the frame rate rather than by refusing, so
+    # the only symptom is a feed that is quietly six times too slow. Measured
+    # on the Xavier, 4 Sept 2026: YUYV 1280x720 = 10 fps, MJPG 1280x720 = 30.
+    fourcc: MJPG           # MJPG | YUYV | "" to accept whatever the driver picks
     frame_px: 512          # long edge used ONLY when altitude or fx_px is missing
     jpeg_quality: 80
     intrinsics:
@@ -87,10 +93,23 @@ processing_layer:
 
   search:
     use_prior: true
+    # A prior is only worth trusting while the vehicle cannot yet have left the
+    # circle being searched: roughly prior_radius_m / max ground speed, so 100 m
+    # at 20 m/s is 5 s. Past that it points where the aircraft used to be, and
+    # since only an accepted fix refreshes it, a stale one locks the solver out
+    # of a map it is still flying over. 0 disables the expiry.
+    prior_max_age_s: 5.0
     prior_radius_m: 100    # around the last accepted fix. Drives latency
                            # directly: it decides how many tiles get searched,
                            # and match cost is linear in reference keypoints.
-    cold_start_max_tiles: 0   # 0 = search the whole map when there is no prior
+    # 0 = search the whole map when there is no prior. Measured on the Xavier
+    # (646x484 frame, xfeat_mnn): 25 tiles = 439 ms of matching, 9 = 112 ms.
+    # The cap SWEEPS -- successive cold frames rotate the window, so the whole
+    # map is still covered, over ceil(25/9) = 3 frames instead of in one. That
+    # trade is only worth taking because a cold start is rare: it happens once
+    # at the start and again after a dropped prior, and every frame in between
+    # goes down the prior path, which selects by geometry and ignores this.
+    cold_start_max_tiles: 9
 
   covariance:
     # gate_only emits a fixed sigma on whatever survives the gate. It is a
@@ -111,6 +130,14 @@ output_layer:
 
   export:
     flush_every: 20
+    # Make session.json answer for itself. The aircraft is GNSS-denied and
+    # internet-denied by definition, so nobody is going to be watching the live
+    # dashboard while it flies: the file brought back afterwards is the entire
+    # record, and it has to open on a laptop with no board and no network.
+    include_logs: true     # per-layer step codes -- WHICH steps ran, not just how many
+    max_log_rows: 4000     # per layer. Faults are kept in full; steps trim first.
+    embed_basemap: true    # the reference tile, downscaled, as a data URI, so the
+                           # map view still draws without /api/map.png
 
   fc:
     # Nothing reaches the vehicle until enabled is true. Turn it on only after

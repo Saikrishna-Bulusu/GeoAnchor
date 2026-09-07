@@ -2,7 +2,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiBase, wsUrl } from './api';
 
-const EMPTY = { layers: {}, logs: [], records: [], fixes: [], map: null, frame: null, board: null, config: null };
+const EMPTY = {
+  layers: {}, logs: [], records: [], fixes: [], map: null, frame: null,
+  board: null, config: null, basemap: null, codes: null, replay: false,
+  // Seconds to add to this browser's clock to get the board's. Every "is this
+  // layer still alive?" test compares a board timestamp against a local one, so
+  // without this the answer is only as good as the agreement between two
+  // machines' clocks. That agreement is not something to assume here: the
+  // Xavier is reached over a point-to-point USB-C link with no NTP, and a
+  // Jetson without a charged RTC cell boots believing it is 1970. A few
+  // seconds of skew is enough to paint every layer permanently dead, or -- far
+  // worse -- permanently alive after it has stopped.
+  clockOffset: 0,
+};
 
 /**
  * Live telemetry over the WebSocket, with replay as a first-class alternative.
@@ -20,6 +32,30 @@ export function useTelemetry(mode) {
   const timer = useRef(null);
 
   const loadSession = useCallback((doc) => {
+    // A session file is meant to be the whole record, openable with no board
+    // and no network. Everything the live dashboard gets off the bus is in
+    // here, so unpack all of it rather than only the records.
+    const codes = doc.codes || [];
+    const byCode = new Map(codes.map((c) => [c.code, c]));
+
+    // Per-layer logs are stored grouped; the panels want one stream. The kind
+    // and description are added by the API from the registry when live, so in
+    // replay they have to come from the registry carried in the file.
+    const logs = Object.entries(doc.logs || {})
+      .flatMap(([layer, v]) => (v.rows || []).map((r) => ({
+        ...r,
+        layer: r.layer || layer,
+        kind: r.kind || byCode.get(r.code)?.kind || 'step',
+        description: r.description || byCode.get(r.code)?.description || '',
+      })))
+      .sort((a, b) => (a.t_unix || 0) - (b.t_unix || 0));
+
+    // The live shape is { status, live }; a recorded layer is neither live nor
+    // dead, so `live` is left false and the cards render a recorded state.
+    const layers = Object.fromEntries(
+      Object.entries(doc.layers || {}).map(([id, status]) => [id, { status, live: false }]),
+    );
+
     setState({
       ...EMPTY,
       records: doc.records || [],
@@ -27,8 +63,22 @@ export function useTelemetry(mode) {
       header: doc.header || null,
       config: doc.header?.config || null,
       board: doc.header?.board || null,
+      map: doc.map || null,
+      basemap: doc.basemap || null,
+      codes,
+      logs,
+      layers,
       replay: true,
     });
+  }, []);
+
+  // Switching modes has to drop what the other mode left on screen. The socket
+  // effect below only stops listening; it does not clear, and live records that
+  // survive into replay make the "open a session" panel think one is already
+  // loaded.
+  const reset = useCallback(() => {
+    setState(EMPTY);
+    setError(null);
   }, []);
 
   useEffect(() => {
@@ -66,7 +116,7 @@ export function useTelemetry(mode) {
     };
   }, [mode]);
 
-  return { state, connected, error, loadSession, setState };
+  return { state, connected, error, loadSession, reset, setState };
 }
 
 function reduce(prev, msg) {
@@ -80,6 +130,13 @@ function reduce(prev, msg) {
         records: data.records || [],
         fixes: data.fixes || [],
         map: data.map, frame: data.frame, board: data.board, config: data.config,
+        // Measured once per connection, which is where it is most accurate:
+        // the snapshot is the first thing sent after the socket opens, so the
+        // round trip is one hop and the error is a few milliseconds against a
+        // 4 s staleness threshold.
+        clockOffset: typeof data.server_time === 'number'
+          ? data.server_time - Date.now() / 1000
+          : 0,
       };
     case 'log':
       return { ...prev, logs: [...prev.logs, data].slice(-400) };

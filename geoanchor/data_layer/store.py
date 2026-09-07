@@ -141,7 +141,14 @@ class FeatureStore:
         observations of the same point and RANSAC sees a consistent model --
         but it does inflate the keypoint count, so overlap is kept modest.
         """
-        keys = tuple(sorted(keys or self.all_tile_keys()))
+        # `is None` means "unspecified, use everything". An EMPTY list means the
+        # caller looked and found no candidate tiles, which is the opposite
+        # request and must not silently widen to the whole map: that is the
+        # badly-conditioned whole-map fit where the correct correspondences are
+        # a handful among thousands spread over hundreds of metres, and RANSAC
+        # answers with a degenerate homography that still passes inliers > 0.
+        # Reachable whenever a prior lands off-map and tiles_covering returns [].
+        keys = tuple(sorted(self.all_tile_keys() if keys is None else keys))
         # The selected tile set changes only when the vehicle crosses a tile
         # boundary, so restacking 13 MB of descriptors on every frame is pure
         # waste. Caching the last set removes it from the latency budget.

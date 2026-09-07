@@ -80,8 +80,15 @@ class Config:
         problems = [f"missing required key: {k}" for k in missing]
 
         loop = self.get("output_layer.fc.loop_mode")
-        if loop not in ("open", "closed"):
-            problems.append("output_layer.fc.loop_mode must be 'open' or 'closed'")
+        if loop is False:
+            # YAML 1.1 resolves a bare `off` to boolean False, so the one value
+            # that means "send nothing to the vehicle" is also the one the
+            # parser eats. Worth its own message: `loop_mode: off` looks
+            # completely correct in the file.
+            problems.append("output_layer.fc.loop_mode is the YAML boolean False, not the "
+                            "string 'off' -- quote it as loop_mode: \"off\"")
+        elif loop not in ("off", "open", "closed"):
+            problems.append("output_layer.fc.loop_mode must be 'off', 'open' or 'closed'")
 
         feed = self.get("data_layer.feed.type")
         if feed not in ("file", "uvc", "rtsp", "env80"):

@@ -1,8 +1,10 @@
 'use client';
+import { memo } from 'react';
 import { fmt } from '@/lib/api';
 
-/** The export, visible. Every column here is a field in the JSON file. */
-export default function RecordTable({ records }) {
+/** The export, visible. Every column here is a field in the JSON file.
+ *  Memoised: 300 rows should not be rebuilt for every camera frame. */
+function RecordTable({ records }) {
   const rows = (records || []).slice(-300).reverse();
   return (
     <div className="panel">
@@ -49,3 +51,5 @@ export default function RecordTable({ records }) {
     </div>
   );
 }
+
+export default memo(RecordTable);

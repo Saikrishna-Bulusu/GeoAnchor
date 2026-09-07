@@ -219,7 +219,7 @@ class DataLayer:
                                    envelope=f"{agl_min}-{agl_max}")
 
             try:
-                _, jpeg, pm = self.pre.run(
+                shown, jpeg, pm = self.pre.run(
                     frame, altitude_m=alt, map_gsd_m_px=self.manifest["gsd_m_px"],
                     # A dataset frame carries its own K, so its intrinsics beat
                     # whatever the config says about the flight camera.
@@ -235,9 +235,21 @@ class DataLayer:
                 self.log.step("DL-12", f"{frame.shape[1]}x{frame.shape[0]}")
             self.log.throttled("DL-13", 30.0, f"scale {pm['scale']}", ms=round(pm["preprocess_ms"], 1))
 
+            # A feed that knows when the frame was really captured says so in
+            # meta; only fall back to "now" for one that cannot. Sampling the
+            # clock here instead would silently subtract the read and the
+            # preprocess from every latency number in the run.
             fp = FramePacket(
-                seq=self.seq, t_capture_unix=t_cap, t_capture_mono=K.now_mono(),
-                width=frame.shape[1], height=frame.shape[0], feed=self.feed.kind,
+                seq=self.seq, t_capture_unix=t_cap,
+                t_capture_mono=meta.get("t_capture_mono") or K.now_mono(),
+                # The JPEG below is the RESCALED frame, so these have to describe
+                # that and not the sensor. Reporting the source size beside a
+                # smaller payload is how the dashboard ends up captioning a
+                # 512 px image "1280x720".
+                width=shown.shape[1], height=shown.shape[0],
+                source_width=frame.shape[1], source_height=frame.shape[0],
+                capture_age_ms=meta.get("capture_age_ms"),
+                feed=self.feed.kind,
                 altitude_m=float(alt) if alt is not None else None,
                 roll_deg=self.state.roll_deg, pitch_deg=self.state.pitch_deg,
                 yaw_deg=self.state.yaw_deg, preprocess_ms=round(pm["preprocess_ms"], 2))
@@ -278,7 +290,12 @@ class DataLayer:
             elif cmd == "pause":
                 self.paused = True
             elif cmd == "resume":
-                self.paused = False
+                # Resuming with no feed would dereference None on the next read.
+                # If the layer is parked because a feed failed to open, resume
+                # means "try that again", not "carry on without one".
+                if self.feed is None:
+                    self.reopen_feed()
+                self.paused = self.feed is None
             elif cmd == "set" and "path" in msg:
                 self.cfg.set(msg["path"], msg.get("value"))
                 self.log.step("DL-02", f"{msg['path']} = {msg.get('value')}")
@@ -302,12 +319,31 @@ class DataLayer:
                 self.cfg.set("data_layer.map.rebuild", False)
 
     def reopen_feed(self) -> None:
+        """Swap the feed on an operator's instruction, without dying if it fails.
+
+        open_feed() exits the process on a bad feed, which is right at startup:
+        a layer that cannot open its camera should say so and stop. It is wrong
+        here. This path is reached from the dashboard, where picking "USB
+        camera (live)" on a board with no camera attached is an ordinary
+        mistake, and the layer taking itself down in response looks exactly like
+        the crash the three-process design exists to rule out.
+
+        So a failure parks the layer instead: the device error is emitted, the
+        feed is left closed, and the loop idles publishing status until a
+        working feed is selected. The process stays up and stays observable.
+        """
         try:
             self.feed.close()
         except Exception:
             pass
+        self.feed = None
         self.seq = 0
-        self.open_feed()
+        try:
+            self.open_feed()
+        except SystemExit:
+            self.paused = True
+            self.log.emit("DLDE-02", "feed could not be opened; the layer is idle and "
+                                     "still reporting. Pick a different feed to resume.")
 
     def stop(self) -> None:
         for closer in (getattr(self, "feed", None), getattr(self, "gps", None)):

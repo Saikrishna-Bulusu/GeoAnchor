@@ -44,7 +44,13 @@ export default function CameraView({ frame, fps = 3 }) {
       <header>
         <h2>Camera</h2>
         <span className="note" style={{ marginLeft: 'auto', fontFamily: 'var(--mono)' }}>
-          {frame ? `${frame.width}x${frame.height} · seq ${frame.seq}` : 'no frame'}
+          {frame
+            // w/h describe the JPEG, which is the rescaled frame the matcher
+            // sees. The sensor size is shown beside it when they differ, so a
+            // 512 px image is never captioned with the camera's 1280.
+            ? `${frame.w}x${frame.h}${frame.source_w && frame.source_w !== frame.w
+                ? ` ← ${frame.source_w}x${frame.source_h}` : ''} · seq ${frame.seq}`
+            : 'no frame'}
         </span>
       </header>
       <div className="body flush">
@@ -54,6 +60,19 @@ export default function CameraView({ frame, fps = 3 }) {
             <div className="camoverlay">
               alt {fmt(frame.altitude_m, 1)} m AGL<br />
               yaw {fmt(frame.yaw_deg, 1)}&deg;
+              {/* Age at the moment the data layer received it, from the
+                  camera's own V4L2 buffer timestamp. This is latency that has
+                  already been spent before any of the pipeline runs, and it is
+                  invisible everywhere else -- ArduPilot will not reject a late
+                  fix, it will fuse it at the wrong time. */}
+              {frame.capture_age_ms != null && (
+                <>
+                  <br />
+                  <span style={{ color: frame.capture_age_ms > 100 ? 'var(--bad)' : 'inherit' }}>
+                    capture age {fmt(frame.capture_age_ms, 0)} ms
+                  </span>
+                </>
+              )}
             </div>
           )}
         </div>

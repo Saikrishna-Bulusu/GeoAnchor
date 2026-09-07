@@ -64,14 +64,21 @@ class FramePacket:
     seq: int
     t_capture_unix: float         # stamped at CAPTURE, never at publish. EKF3
     t_capture_mono: float         # compensates delay from this, so it must be true.
-    width: int
-    height: int
+    width: int                    # of the JPEG payload, i.e. what the matcher
+    height: int                   # sees -- NOT the sensor's own frame size.
     feed: str                     # "uvc" | "file" | "rtsp"
     altitude_m: float = None
     roll_deg: float = None
     pitch_deg: float = None
     yaw_deg: float = None
     preprocess_ms: float = 0.0
+    source_width: int = None      # before the rescale to the reference GSD
+    source_height: int = None
+    # How stale the frame already was when the data layer received it, from the
+    # camera's own V4L2 buffer timestamp. This is the capture half of
+    # OVERHEAD_MS and it is not otherwise recoverable downstream: by the time a
+    # fix exists, the queue delay that produced it is long gone.
+    capture_age_ms: float = None
     schema: int = SCHEMA_VERSION
 
 

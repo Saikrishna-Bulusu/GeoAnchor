@@ -96,10 +96,25 @@ def detect() -> Board:
 # -- power -----------------------------------------------------------------
 # Jetson carries INA3221 rails; the sysfs layout moved between L4T releases,
 # so every known location is tried and the one that answered is recorded.
+#
+# hwmon naming is not a detail here. The convention is fixed: inN_input is a
+# VOLTAGE in millivolts, currN_input a CURRENT in milliamps, powerN_input a
+# POWER in microwatts. This list used to lead with `in*_input` and multiply it
+# by 1000 as though it were power, which sums the board's rail voltages and
+# calls the total watts -- a number that looks plausible, barely moves under
+# load, and would make every joule-per-fix in the study wrong. It stayed hidden
+# only because these files are mode 400 on L4T 35, so the read failed and the
+# function correctly returned None; a udev rule added to "make power work" would
+# have turned a silent absence into a confident fabrication.
+#
+# Verified on this AGX Xavier, 4 Sept 2026: chips 1-0040 and 1-0041 expose
+# in1..in7_input and curr1..curr4_input, and NO powerN_input at all. So the
+# third entry is the one that actually applies to JetPack 5, and it needs the
+# voltage x current pairing below rather than a plain sum.
 _JETSON_POWER_GLOBS = [
-    "/sys/bus/i2c/drivers/ina3221/*/hwmon/hwmon*/in*_input",       # L4T 35 (JetPack 5)
-    "/sys/bus/i2c/drivers/ina3221x/*/iio:device*/in_power*_input",  # L4T 32 (JetPack 4)
-    "/sys/bus/i2c/drivers/ina3221/*/hwmon/hwmon*/power*_input",
+    "/sys/bus/i2c/drivers/ina3221/*/hwmon/hwmon*/power*_input",     # microwatts, if exposed
+    "/sys/bus/i2c/drivers/ina3221x/*/iio:device*/in_power*_input",  # milliwatts, L4T 32 (JetPack 4)
+    "/sys/bus/i2c/drivers/ina3221/*/hwmon/hwmon*/curr*_input",      # mA, paired with inN_input mV
 ]
 
 
@@ -132,18 +147,33 @@ def _jetson_power_w() -> float | None:
         files = sorted(glob.glob(pat))
         if not files:
             continue
-        total_uw = 0.0
-        found = False
+        total_uw, found = 0.0, False
         for f in files:
+            base = os.path.basename(f)
             raw = _read(f)
             if not raw.lstrip("-").isdigit():
                 continue
             val = float(raw)
-            # hwmon powerN_input is microwatts; iio in_power*_input is milliwatts.
-            total_uw += val if "hwmon" in f and "power" in os.path.basename(f) else val * 1000.0
+            if base.startswith("curr"):
+                # P = V x I. The matching voltage channel sits beside it as
+                # inN_input in millivolts, so mV x mA = microwatts directly.
+                # A current with no voltage beside it is not power and is
+                # skipped rather than guessed at.
+                volts = _read(os.path.join(os.path.dirname(f),
+                                           base.replace("curr", "in", 1)))
+                if not volts.lstrip("-").isdigit():
+                    continue
+                total_uw += val * float(volts)
+            elif "power" in base:
+                # hwmon powerN_input is microwatts; iio in_power*_input is milliwatts.
+                total_uw += val if "hwmon" in f else val * 1000.0
+            else:
+                continue
             found = True
         if found and total_uw > 0:
             return round(total_uw / 1e6, 3)
+    # None, never 0.0. A zero silently becomes a joules-per-fix of zero, and
+    # that has already cost one run.
     return None
 
 
