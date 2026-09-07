@@ -548,20 +548,43 @@ grid straddled the entire collapse.
 XFeat's 36.18 m. For a covariance estimator, and for anything that has to
 survive a bad fix, that matters more than the accept rate does.
 
-**Reduce along the contiguous axis when matching.** The obvious mutual-nearest
--neighbour -- one product, then `max(dim=1)` and `max(dim=0)` -- is about half
-the speed of computing the transpose product as well and reducing both with
-`max(dim=1)`. Against the 51200-keypoint sydney store that is 902 ms against
-545 ms, because `max(dim=0)` walks a (4096, 51200) row-major tensor across its
-stride and spends the run in cache misses. Two matmuls and two fast reductions
-beat one matmul and one slow one even at twice the memory. XFeat's own matcher
-is written this way; the first version of `EdgePoint2Method.match` was not, and
-it made EdgePoint2 look SLOWER than XFeat on the live pipeline (949 ms against
-837 ms median) while being faster on every isolated benchmark.
+**The matcher's fast form depends on the reference size, and the crossover is
+a cliff.** Mutual nearest neighbour needs a max along each axis. `max(dim=0)`
+walks a (Q, N) row-major tensor across its stride; past a point that falls off
+a cliff, and paying for a second matmul to reduce the transpose along the
+contiguous axis wins instead. AGX Xavier, pinned clocks, Q=4096:
 
-Where it still loses: Scene_09 (9 tiles) at every gate -- 22.4% against 35.1%
-at gate 10 -- though it is more precise at every gate at or above 15 (p90 3.06
-against 4.59 at gate 25) and 1.15x faster. Scene_10 it wins outright, at 1.32x.
+    ref kpts    2048   4800  11589  16000  22528  51200
+    one-matmul  39.9   40.5   87.0  116.3  401.9  883.7
+    two-matmul  27.8   64.6  117.9  203.6  233.4  610.3
+
+Note 116 -> 402 ms for one-matmul between 16000 and 22528, against a 1.4x size
+increase. `EdgePoint2Method.WIDE_REF = 20000` picks the form; both return
+IDENTICAL index sets, so a wrong threshold costs milliseconds, never
+correctness. **It is a cache effect and therefore board-specific -- re-measure
+on a Pi 5 or TX2 rather than assuming this number.** Chunking to bound the
+working set was tried and is worse than both at every size (1043 ms at 51200).
+
+Two ways this was got wrong first: always using one form made EdgePoint2 look
+SLOWER than XFeat on the live pipeline (949 against 837 ms) while winning every
+isolated benchmark; then always using the other regressed env80 Scene_09's
+match by 71% (72 -> 123 ms), because 11589 keypoints sits below the cliff.
+
+**Head to head, each at its own gate.** All of the following is one session,
+clocks pinned, same frames, with xfeat_mnn re-measured alongside rather than
+quoted from an older run:
+
+    sc  method          gate  accept  med_m  p90_m  max_m  lat med   p95
+    09  xfeat_mnn         10   35.1%  2.666  4.507  6.645    674.5  906.2
+    09  edgepoint2_s64     8   32.1%  2.921  4.944  7.497    535.7  729.5
+    10  xfeat_mnn         10   17.2%  3.518  4.687  6.748    168.5  235.5
+    10  edgepoint2_s64     8   41.1%  3.829  5.050  7.356    129.5  185.4
+
+EdgePoint2 is faster on both scenes (1.26x, 1.30x) and accepts 2.4x as many
+frames on Scene_10, at errors within a few hundred millimetres of XFeat's.
+Scene_09 is the one place XFeat still leads on accept rate, 35.1% to 32.1%.
+Its plausible-solve ceiling tells the same story from the other side: XFeat
+47.0% / 18.8% across the two scenes, EdgePoint2 37.3% / 42.2%.
 
 ---
 

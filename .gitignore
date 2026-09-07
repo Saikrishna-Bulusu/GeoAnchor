@@ -12,3 +12,4 @@ dashboard/.next/
 dashboard/out/
 .DS_Store
 data
+.logs/

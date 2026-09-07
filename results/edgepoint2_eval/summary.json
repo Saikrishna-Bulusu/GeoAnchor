@@ -12,6 +12,7 @@
     "frame_keypoints": 4096,
     "ref_keypoints": 2048,
     "frame_px": 512,
+    "score": -5.0,
     "tile_px": 1024,
     "overlap_px": 128,
     "min_matches": 12,
@@ -25,14 +26,14 @@
     "no_tile_ransac": false,
     "rebuild": false
   },
-  "generated": 1788754750.390876,
+  "generated": 1788761689.8632054,
   "summaries": {
     "Scene_09__satellite__xfeat_mnn": {
       "n_frames": 134,
       "n_plausible": 63,
       "plausible_rate": 0.4701,
-      "median_latency_ms": 590.05,
-      "p95_latency_ms": 853.0249999999999,
+      "median_latency_ms": 687.65,
+      "p95_latency_ms": 927.5249999999997,
       "median_inliers": 13,
       "p10_inliers": 7.2,
       "gates": {
@@ -185,8 +186,8 @@
       "n_frames": 134,
       "n_plausible": 19,
       "plausible_rate": 0.1418,
-      "median_latency_ms": 416.85,
-      "p95_latency_ms": 602.265,
+      "median_latency_ms": 495.4,
+      "p95_latency_ms": 674.64,
       "median_inliers": 6,
       "p10_inliers": 5.0,
       "gates": {
@@ -339,8 +340,8 @@
       "n_frames": 134,
       "n_plausible": 14,
       "plausible_rate": 0.1045,
-      "median_latency_ms": 447.7,
-      "p95_latency_ms": 627.2699999999999,
+      "median_latency_ms": 520.8499999999999,
+      "p95_latency_ms": 760.1899999999998,
       "median_inliers": 6.0,
       "p10_inliers": 5.0,
       "gates": {
@@ -493,8 +494,8 @@
       "n_frames": 134,
       "n_plausible": 50,
       "plausible_rate": 0.3731,
-      "median_latency_ms": 470.95,
-      "p95_latency_ms": 657.2049999999994,
+      "median_latency_ms": 534.9,
+      "p95_latency_ms": 737.5749999999997,
       "median_inliers": 11.0,
       "p10_inliers": 7.0,
       "gates": {
@@ -647,8 +648,8 @@
       "n_frames": 192,
       "n_plausible": 36,
       "plausible_rate": 0.1875,
-      "median_latency_ms": 134.45,
-      "p95_latency_ms": 187.16999999999993,
+      "median_latency_ms": 167.64999999999998,
+      "p95_latency_ms": 322.67499999999995,
       "median_inliers": 26.0,
       "p10_inliers": 11.0,
       "gates": {
@@ -801,8 +802,8 @@
       "n_frames": 192,
       "n_plausible": 38,
       "plausible_rate": 0.1979,
-      "median_latency_ms": 85.55,
-      "p95_latency_ms": 121.48999999999998,
+      "median_latency_ms": 109.35,
+      "p95_latency_ms": 153.45999999999998,
       "median_inliers": 14.0,
       "p10_inliers": 8.7,
       "gates": {
@@ -955,8 +956,8 @@
       "n_frames": 192,
       "n_plausible": 46,
       "plausible_rate": 0.2396,
-      "median_latency_ms": 88.0,
-      "p95_latency_ms": 138.74999999999997,
+      "median_latency_ms": 114.65,
+      "p95_latency_ms": 175.87499999999997,
       "median_inliers": 16.0,
       "p10_inliers": 10.0,
       "gates": {
@@ -1109,8 +1110,8 @@
       "n_frames": 192,
       "n_plausible": 71,
       "plausible_rate": 0.3698,
-      "median_latency_ms": 90.85,
-      "p95_latency_ms": 142.64999999999998,
+      "median_latency_ms": 115.9,
+      "p95_latency_ms": 172.97,
       "median_inliers": 15,
       "p10_inliers": 10,
       "gates": {

@@ -90,7 +90,11 @@ def run_one(scene_dir, frames_dir, mode, method_name, cfg, out_csv, args) -> lis
         print("    no frames inside the envelope")
         return []
 
-    method = M.build(method_name, max_keypoints=args.frame_keypoints)
+    # score is edgepoint2-only; _xf drops unknown keys for every other method,
+    # so passing it unconditionally is harmless and keeps the run reproducible
+    # from its own summary.json args.
+    method = M.build(method_name, max_keypoints=args.frame_keypoints,
+                     score=args.score)
     ok, why = method.available()
     if not ok:
         print(f"    SKIP {method_name}: {why}")
@@ -202,6 +206,9 @@ def main() -> int:
     ap.add_argument("--frame-keypoints", type=int, default=4096)
     ap.add_argument("--ref-keypoints", type=int, default=2048)
     ap.add_argument("--frame-px", type=int, default=512)
+    ap.add_argument("--score", type=float, default=None,
+                    help="edgepoint2 detection threshold; None = the method default (-12). "
+                         "Upstream ships -5, which starves it of keypoints on env80.")
     ap.add_argument("--tile-px", type=int, default=1024)
     ap.add_argument("--overlap-px", type=int, default=128)
     ap.add_argument("--min-matches", type=int, default=12)

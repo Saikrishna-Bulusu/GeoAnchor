@@ -318,6 +318,13 @@ class EdgePoint2Method(Method):
     # is measuring. Raise it towards -5 to trade keypoints back for speed.
     DEFAULT_SCORE = -12.0
 
+    # Reference-keypoint count above which the transpose-product matcher wins.
+    # The crossover is a cache effect and is therefore BOARD-SPECIFIC: this is
+    # the AGX Xavier's, and it must be re-measured on a Pi 5 or a TX2 rather
+    # than assumed. Getting it wrong costs tens of milliseconds, never
+    # correctness -- both forms return identical index sets.
+    WIDE_REF = 20000
+
     def __init__(self, name: str = "edgepoint2_t32", max_keypoints: int = 4096,
                  min_cossim: float = 0.82, threads: int = 0, score: float = None):
         self.name = name
@@ -408,18 +415,23 @@ class EdgePoint2Method(Method):
         da = torch.from_numpy(fa.desc)
         db = torch.from_numpy(fb.desc)
         with torch.inference_mode():
-            # Both reductions run along the CONTIGUOUS axis, which is why the
-            # transpose product is computed rather than reducing the first
-            # matrix with max(dim=0). Against a 51200-keypoint reference that
-            # one change is worth ~2x: max(dim=0) walks a (4096, 51200)
-            # row-major tensor across its stride and spends the whole time in
-            # cache misses. Two matmuls and two fast reductions beat one matmul
-            # and one slow one, even though it materialises twice the memory.
-            # XFeat's own matcher is written this way for the same reason.
             cossim = da @ db.T
-            cossim_t = db @ da.T
             best, m12 = cossim.max(dim=1)
-            _, m21 = cossim_t.max(dim=1)
+            if len(fb) > self.WIDE_REF:
+                # Reducing the OTHER way needs max(dim=0), which walks a
+                # (Q, N) row-major tensor across its stride. Past a threshold
+                # that falls off a cliff -- measured on an AGX Xavier at pinned
+                # clocks, Q=4096: 116 ms at N=16000 but 402 ms at N=22528 --
+                # so above it, pay for a second matmul and reduce that along
+                # the contiguous axis instead. At N=51200 that is 884 -> 610 ms.
+                # XFeat's matcher always does this; always doing it is wrong,
+                # because BELOW the cliff the extra matmul costs more than the
+                # strided reduction saves (N=11589: 87 ms one-matmul against
+                # 118 ms two-matmul). Chunking to bound the working set was
+                # tried and is worse than both at every size.
+                _, m21 = (db @ da.T).max(dim=1)
+            else:
+                _, m21 = cossim.max(dim=0)
             idx1 = torch.arange(len(m12))
             keep = (m21[m12] == idx1) & (best > self.min_cossim)
             idx1, idx2, conf = idx1[keep], m12[keep], best[keep]
