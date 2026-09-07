@@ -544,6 +544,32 @@ fixes. `configs/env80.yaml` is 10 (xfeat_mnn); use 8 if you switch the method.
 `GATES` in `env80_sweep.py` now includes 6, 8, 12 and 14 -- the old 5/10/15
 grid straddled the entire collapse.
 
+**top_k is a real tradeoff for EdgePoint2, unlike for xfeat_mnn.** env80,
+clocks pinned, gate 8, `results/topk_sweep_ep2/`:
+
+    sc     k   detect   match   total     p95   plaus   acc@8   med_m
+    09   512    433.1    16.3   467.0   670.4    5.2%    0.8%   3.061
+    09  1024    418.1    48.7   485.1   704.3   13.4%    2.2%   2.230
+    09  2048    403.1    46.4   478.1   684.1   30.6%   23.1%   2.545
+    09  4096    447.9   444.2   933.3  1086.7   43.3%   37.3%   2.948
+    10   512    113.8     3.6   126.8   186.6   23.4%   18.2%   3.866
+    10  1024    122.8     9.1   141.8   186.8   25.0%   24.5%   3.967
+    10  2048    103.0    24.7   137.1   201.1   40.1%   40.1%   3.829
+    10  4096    127.5    61.0   198.6   260.1   45.3%   44.3%   3.591
+
+For xfeat_mnn, k=4096 dominated every other point on both axes. Here **k=2048
+is the knee**: on Scene_09 it buys 23.1% accept at 478 ms where 4096 buys 37.3%
+at 933 ms -- 1.6x the accept rate for 2x the latency -- and on Scene_10 it
+reaches 40.1% at a p95 of 201 ms, inside the 250 ms budget, against xfeat_mnn's
+17.2% at 168 ms. `configs/*.yaml` still ship `max_keypoints: 4096`, which is
+right for xfeat_mnn and probably wrong for edgepoint2_s64.
+
+The Scene_09 latency cliff between 2048 and 4096 is `WIDE_REF` firing, not the
+detector: 9 tiles x 2048 = 18432 reference keypoints uses the one-matmul path
+at 46 ms, and 9 x 4096 = 36864 crosses 20000 into the transpose-product path at
+444 ms. The two findings are the same finding seen twice -- reference-keypoint
+count, not frame keypoints, is what the matcher cost tracks.
+
 **Its failures are far less wild.** Ungated p90 on Scene_09 is 7.58 m against
 XFeat's 36.18 m. For a covariance estimator, and for anything that has to
 survive a bad fix, that matters more than the accept rate does.

@@ -1,0 +1,340 @@
+{
+  "args": {
+    "config": "configs/env80.yaml",
+    "data_root": "data/AnyVisLoc",
+    "frames_root": "data/AnyVisLoc_env80",
+    "scenes": "Scene_09,Scene_10",
+    "modes": "satellite",
+    "methods": "edgepoint2_s64",
+    "out": "results/topk_sweep_ep2/k2048",
+    "prior": "none",
+    "prior_radius": 120.0,
+    "frame_keypoints": 2048,
+    "ref_keypoints": 2048,
+    "frame_px": 512,
+    "score": null,
+    "tile_px": 1024,
+    "overlap_px": 128,
+    "min_matches": 12,
+    "ransac_px": 3.0,
+    "agl_min": 50.0,
+    "agl_max": 100.0,
+    "view_angle_min": 80.0,
+    "anchor": null,
+    "limit": 0,
+    "no_rectify": false,
+    "no_tile_ransac": false,
+    "rebuild": false
+  },
+  "generated": 1788762834.832507,
+  "summaries": {
+    "Scene_09__satellite__edgepoint2_s64": {
+      "n_frames": 134,
+      "n_plausible": 41,
+      "plausible_rate": 0.306,
+      "median_latency_ms": 478.1,
+      "p95_latency_ms": 684.1099999999996,
+      "median_inliers": 9,
+      "p10_inliers": 6,
+      "gates": {
+        "0": {
+          "accepted": 41,
+          "accept_rate": 0.306,
+          "median_m": 2.848,
+          "p90_m": 6.636,
+          "p99_m": 125.931,
+          "max_m": 165.184,
+          "within_5m": 0.8049,
+          "within_10m": 0.9268,
+          "within_20m": 0.9268
+        },
+        "5": {
+          "accepted": 41,
+          "accept_rate": 0.306,
+          "median_m": 2.848,
+          "p90_m": 6.636,
+          "p99_m": 125.931,
+          "max_m": 165.184,
+          "within_5m": 0.8049,
+          "within_10m": 0.9268,
+          "within_20m": 0.9268
+        },
+        "6": {
+          "accepted": 39,
+          "accept_rate": 0.291,
+          "median_m": 2.764,
+          "p90_m": 5.339,
+          "p99_m": 105.333,
+          "max_m": 165.184,
+          "within_5m": 0.8462,
+          "within_10m": 0.9744,
+          "within_20m": 0.9744
+        },
+        "8": {
+          "accepted": 31,
+          "accept_rate": 0.2313,
+          "median_m": 2.545,
+          "p90_m": 4.766,
+          "p99_m": 5.588,
+          "max_m": 5.737,
+          "within_5m": 0.9032,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "10": {
+          "accepted": 20,
+          "accept_rate": 0.1493,
+          "median_m": 2.383,
+          "p90_m": 3.748,
+          "p99_m": 5.642,
+          "max_m": 5.737,
+          "within_5m": 0.9,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "12": {
+          "accepted": 14,
+          "accept_rate": 0.1045,
+          "median_m": 2.383,
+          "p90_m": 3.524,
+          "p99_m": 5.457,
+          "max_m": 5.737,
+          "within_5m": 0.9286,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "14": {
+          "accepted": 9,
+          "accept_rate": 0.0672,
+          "median_m": 2.359,
+          "p90_m": 2.832,
+          "p99_m": 3.331,
+          "max_m": 3.386,
+          "within_5m": 1.0,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "15": {
+          "accepted": 8,
+          "accept_rate": 0.0597,
+          "median_m": 2.244,
+          "p90_m": 2.901,
+          "p99_m": 3.338,
+          "max_m": 3.386,
+          "within_5m": 1.0,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "20": {
+          "accepted": 6,
+          "accept_rate": 0.0448,
+          "median_m": 2.244,
+          "p90_m": 2.619,
+          "p99_m": 2.686,
+          "max_m": 2.693,
+          "within_5m": 1.0,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "25": {
+          "accepted": 5,
+          "accept_rate": 0.0373,
+          "median_m": 2.129,
+          "p90_m": 2.634,
+          "p99_m": 2.687,
+          "max_m": 2.693,
+          "within_5m": 1.0,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "30": {
+          "accepted": 1,
+          "accept_rate": 0.0075,
+          "median_m": 2.129,
+          "p90_m": 2.129,
+          "p99_m": 2.129,
+          "max_m": 2.129,
+          "within_5m": 1.0,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "40": {
+          "accepted": 0,
+          "accept_rate": 0.0,
+          "median_m": null,
+          "p90_m": null,
+          "p99_m": null,
+          "max_m": null,
+          "within_5m": null,
+          "within_10m": null,
+          "within_20m": null
+        },
+        "60": {
+          "accepted": 0,
+          "accept_rate": 0.0,
+          "median_m": null,
+          "p90_m": null,
+          "p99_m": null,
+          "max_m": null,
+          "within_5m": null,
+          "within_10m": null,
+          "within_20m": null
+        }
+      }
+    },
+    "Scene_10__satellite__edgepoint2_s64": {
+      "n_frames": 192,
+      "n_plausible": 77,
+      "plausible_rate": 0.401,
+      "median_latency_ms": 137.05,
+      "p95_latency_ms": 201.09,
+      "median_inliers": 18,
+      "p10_inliers": 11.0,
+      "gates": {
+        "0": {
+          "accepted": 77,
+          "accept_rate": 0.401,
+          "median_m": 3.829,
+          "p90_m": 5.679,
+          "p99_m": 8.297,
+          "max_m": 9.606,
+          "within_5m": 0.8701,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "5": {
+          "accepted": 77,
+          "accept_rate": 0.401,
+          "median_m": 3.829,
+          "p90_m": 5.679,
+          "p99_m": 8.297,
+          "max_m": 9.606,
+          "within_5m": 0.8701,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "6": {
+          "accepted": 77,
+          "accept_rate": 0.401,
+          "median_m": 3.829,
+          "p90_m": 5.679,
+          "p99_m": 8.297,
+          "max_m": 9.606,
+          "within_5m": 0.8701,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "8": {
+          "accepted": 77,
+          "accept_rate": 0.401,
+          "median_m": 3.829,
+          "p90_m": 5.679,
+          "p99_m": 8.297,
+          "max_m": 9.606,
+          "within_5m": 0.8701,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "10": {
+          "accepted": 72,
+          "accept_rate": 0.375,
+          "median_m": 3.793,
+          "p90_m": 5.293,
+          "p99_m": 8.383,
+          "max_m": 9.606,
+          "within_5m": 0.8889,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "12": {
+          "accepted": 65,
+          "accept_rate": 0.3385,
+          "median_m": 3.788,
+          "p90_m": 4.737,
+          "p99_m": 7.776,
+          "max_m": 9.606,
+          "within_5m": 0.9231,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "14": {
+          "accepted": 59,
+          "accept_rate": 0.3073,
+          "median_m": 3.788,
+          "p90_m": 4.625,
+          "p99_m": 7.948,
+          "max_m": 9.606,
+          "within_5m": 0.9492,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "15": {
+          "accepted": 53,
+          "accept_rate": 0.276,
+          "median_m": 3.788,
+          "p90_m": 4.67,
+          "p99_m": 8.119,
+          "max_m": 9.606,
+          "within_5m": 0.9434,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "20": {
+          "accepted": 34,
+          "accept_rate": 0.1771,
+          "median_m": 3.694,
+          "p90_m": 4.575,
+          "p99_m": 5.235,
+          "max_m": 5.451,
+          "within_5m": 0.9706,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "25": {
+          "accepted": 16,
+          "accept_rate": 0.0833,
+          "median_m": 3.574,
+          "p90_m": 3.868,
+          "p99_m": 4.036,
+          "max_m": 4.052,
+          "within_5m": 1.0,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "30": {
+          "accepted": 8,
+          "accept_rate": 0.0417,
+          "median_m": 3.612,
+          "p90_m": 3.979,
+          "p99_m": 4.045,
+          "max_m": 4.052,
+          "within_5m": 1.0,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "40": {
+          "accepted": 1,
+          "accept_rate": 0.0052,
+          "median_m": 4.052,
+          "p90_m": 4.052,
+          "p99_m": 4.052,
+          "max_m": 4.052,
+          "within_5m": 1.0,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "60": {
+          "accepted": 0,
+          "accept_rate": 0.0,
+          "median_m": null,
+          "p90_m": null,
+          "p99_m": null,
+          "max_m": null,
+          "within_5m": null,
+          "within_10m": null,
+          "within_20m": null
+        }
+      }
+    }
+  }
+}
