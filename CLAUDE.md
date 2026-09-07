@@ -481,6 +481,49 @@ class of hardware to be measured against. Ours is the baseline. XFeat is still
 worth keeping for robustness to viewpoint and illumination, which is what it
 actually buys over SIFT, but not for speed on a CPU-only ARM target.
 
+### EdgePoint2: faster, far fewer catastrophic failures, and the gate hides it
+
+`geoanchor/methods.py::EdgePoint2Method` (`edgepoint2_t32/_s32/_s64`, MIT,
+clone at `<repo>/edgepoint2`). Measured on env80, Xavier at MAXN, cold start.
+
+**The reason to use it is NOT the compact descriptor.** 32-D against XFeat's
+64-D changes matching by 2% (464.6 -> 454.5 ms against a 51200-keypoint
+reference), because the cost is materialising and reducing the ~2459 x 51200
+similarity matrix -- about 500 MB of intermediate -- not the descriptor product.
+Halving the width halves only the input read. Worse, on the hard scene the 32-D
+variants collapse: Scene_09 accept at gate 25 is 5.2% for S64 against 0.8%
+(T32) and 0.0% (S32). Narrow descriptors cost accuracy and buy no speed here.
+**Use S64.** The speed comes from the network: detect 248 -> 149-170 ms.
+
+**Set `score`, not just `top_k`.** Upstream defaults to `score=-5`, and on
+env80 query frames that gate -- not `top_k` -- decides the keypoint count:
+2278 where XFeat gives 4096. Since accept rate rises monotonically with
+keypoint count, that alone made EdgePoint2 look worse. `DEFAULT_SCORE = -12`
+saturates `top_k` and puts both methods on the same budget; Scene_10 accept
+then goes 5.7% -> 9.9%, exactly XFeat's.
+
+**The gate at 25 is tuned for XFeat's inlier distribution and hides the
+result.** Accept rate against gate, Scene_10, at equal p90 error:
+
+    gate            10      15      20      25
+    xfeat_mnn     17.2%   15.6%   13.5%    9.9%     p90 4.69 / 4.80 / 4.04 / 3.73
+    edgepoint2    37.0%   28.6%   18.2%    9.9%     p90 4.72 / 4.68 / 4.26 / 4.14
+
+At gates 10-15 EdgePoint2-S64 gives **roughly twice the accept rate for the
+same p90 error**, and the two converge only at 25. Re-tune the gate per
+descriptor before comparing anything -- `env80_sweep.py` computes the whole
+curve for exactly this reason and its docstring says so.
+
+**Its failures are far less wild.** Ungated p90 on Scene_09 is 7.58 m against
+XFeat's 36.18 m. For a covariance estimator, and for anything that has to
+survive a bad fix, that matters more than the accept rate does.
+
+Where it still loses: Scene_09 (9 tiles) at every gate -- 22.4% against 35.1%
+at gate 10 -- though it is more precise at every gate at or above 15 (p90 3.06
+against 4.59 at gate 25) and 1.15x faster. Scene_10 it wins outright, at 1.32x.
+
+---
+
 ### The demo flight moves at 85.6 m/s -- do not tune latency against it
 
 `demo/flight.mp4` steps 21.41 m between frames at 4 fps: 1464 m of track over

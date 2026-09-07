@@ -269,11 +269,175 @@ class XFeatMethod(Method):
 
 
 # --------------------------------------------------------------------------
+# EdgePoint2. MIT, 32/48/64-D descriptors, trained for embedded CPU inference.
+#
+# The reason to have it is the DESCRIPTOR WIDTH, not the network. On this
+# hardware the published CPU gain over XFeat is 1.16x (Orin-NX, 40.84 vs 35.33
+# FPS) even though it uses 2.7x fewer GFLOPs -- the CPU path is memory-bound,
+# not FLOP-bound, which is the same reason detection here uses only 2.7 of 8
+# cores. Matching, however, is a dense descriptor product and is linear in
+# width, so 32-D against XFeat's 64-D should roughly halve it, and halves the
+# reference store on disk and in RAM with it.
+#
+# Whether the accuracy holds is the open question and the reason this is a
+# method rather than a replacement: the paper evaluates homography, relative
+# pose, FM-Bench and visual localization, none of which are cross-view aerial
+# to satellite. Measure on env80 before believing anything.
+# --------------------------------------------------------------------------
+def _edgepoint2_root() -> Path | None:
+    candidates = [
+        os.environ.get("EDGEPOINT2_ROOT"),
+        REPO_ROOT / "edgepoint2",
+        REPO_ROOT.parent / "third_party" / "EdgePoint2",
+        Path.home() / "GeoAnchor" / "third_party" / "EdgePoint2",
+    ]
+    for c in candidates:
+        if not c:
+            continue
+        p = Path(c)
+        if (p / "edgepoint2.py").exists() and (p / "model" / "model.py").exists():
+            return p
+    return None
+
+
+class EdgePoint2Method(Method):
+    kind = "float"
+    learned = True
+
+    # T/S/M/L/E is network size, the number is descriptor width. T32 is the
+    # cheapest at 130 KB of weights; E64 is the most accurate and the biggest.
+    CONFIGS = ("T32", "T48", "S32", "S48", "S64", "M32", "M48", "M64",
+               "L32", "L48", "L64", "E32", "E48", "E64")
+
+    # The upstream default is score=-5, and on env80 query frames that gate --
+    # not top_k -- is what decides the keypoint count: -5 yields 2278 where
+    # XFeat yields 4096, and the top_k sweep showed accept rate rising
+    # monotonically with keypoint count (0% at 512 to 15.1% at 4096). -12
+    # saturates top_k on the same frames, which puts the two methods on the
+    # same budget and leaves top_k as the single knob, which is what the sweep
+    # is measuring. Raise it towards -5 to trade keypoints back for speed.
+    DEFAULT_SCORE = -12.0
+
+    def __init__(self, name: str = "edgepoint2_t32", max_keypoints: int = 4096,
+                 min_cossim: float = 0.82, threads: int = 0, score: float = None):
+        self.name = name
+        self.cfg = name.rsplit("_", 1)[-1].upper()
+        self.max_keypoints = int(max_keypoints)
+        self.min_cossim = float(min_cossim)
+        self.threads = threads
+        self.score = self.DEFAULT_SCORE if score is None else float(score)
+        self._m = None
+        self._torch = None
+
+    def available(self) -> tuple:
+        root = _edgepoint2_root()
+        if root is None:
+            return False, ("EdgePoint2 not found. Set EDGEPOINT2_ROOT, or clone "
+                           "https://github.com/HITCSC/EdgePoint2 to <repo>/edgepoint2.")
+        if self.cfg not in self.CONFIGS:
+            return False, f"unknown config '{self.cfg}'. Known: {', '.join(self.CONFIGS)}"
+        try:
+            importlib.import_module("torch")
+        except ImportError:
+            return False, "torch is not installed -- run bootstrap.sh"
+        if not (root / "weights" / f"{self.cfg}.pth").exists():
+            return False, f"weights missing at {root/'weights'/f'{self.cfg}.pth'}"
+        return True, ""
+
+    def _load(self):
+        if self._m is not None:
+            return
+        root = _edgepoint2_root()
+        if root is None:
+            raise RuntimeError("EdgePoint2 not found")
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+        import torch
+        self._torch = torch
+        if self.threads:
+            torch.set_num_threads(int(self.threads))
+        mod = importlib.import_module("edgepoint2")
+        # EdgePoint2Wrapper.__init__ does torch.load(f'./weights/{cfg}.pth'),
+        # a path relative to the PROCESS cwd rather than to the package. Every
+        # layer here runs from the repo root, so loading it unaided raises
+        # FileNotFoundError -- and it would do so lazily, on the first frame.
+        # chdir for the duration of construction only, and restore it even if
+        # the load raises, because a layer that silently changed the working
+        # directory would break every relative path in the config after it.
+        cwd = os.getcwd()
+        try:
+            os.chdir(root)
+            self._m = mod.EdgePoint2Wrapper(self.cfg, top_k=self.max_keypoints,
+                                            score=self.score).eval()
+        finally:
+            os.chdir(cwd)
+
+    def detect(self, image_bgr: np.ndarray) -> Features:
+        self._load()
+        torch = self._torch
+        img = image_bgr
+        if img.ndim == 2:
+            img = np.repeat(img[:, :, None], 3, axis=2)
+        # RGB and 0..1, unlike XFeat which takes 0..255. Feeding it 0..255
+        # produces keypoints and descriptors without complaint, just far worse
+        # ones, so there is nothing to catch downstream except a bad inlier
+        # count that looks like a hard scene.
+        rgb = img[:, :, ::-1].copy()
+        t = torch.from_numpy(rgb).permute(2, 0, 1).float()[None] / 255.0
+        with torch.inference_mode():
+            out = self._m(t)[0]
+        h, w = img.shape[:2]
+        return Features(
+            kpts=out["keypoints"].cpu().numpy().astype(np.float32),
+            desc=out["descriptors"].cpu().numpy().astype(np.float32),
+            scores=out["scores"].cpu().numpy().astype(np.float32),
+            image_size=(w, h),
+        )
+
+    def match(self, fa: Features, fb: Features) -> tuple:
+        self._load()
+        torch = self._torch
+        if len(fa) == 0 or len(fb) == 0:
+            return np.zeros(0, int), np.zeros(0, int), np.zeros(0, np.float32)
+        # Descriptors leave the network L2-normalised (model.sample defaults to
+        # norm=True), so the dot product IS cosine similarity and the same
+        # min_cossim threshold as XFeat applies unchanged.
+        da = torch.from_numpy(fa.desc)
+        db = torch.from_numpy(fb.desc)
+        with torch.inference_mode():
+            cossim = da @ db.T
+            _, m12 = cossim.max(dim=1)
+            _, m21 = cossim.max(dim=0)
+            idx1 = torch.arange(len(m12))
+            mutual = m21[m12] == idx1
+            idx1, idx2 = idx1[mutual], m12[mutual]
+            conf = cossim[idx1, idx2]
+            keep = conf > self.min_cossim
+            idx1, idx2, conf = idx1[keep], idx2[keep], conf[keep]
+        return (idx1.cpu().numpy().astype(int),
+                idx2.cpu().numpy().astype(int),
+                conf.cpu().numpy().astype(np.float32))
+
+    def describe(self) -> dict:
+        d = super().describe()
+        d["config"] = self.cfg
+        d["descriptor_dim"] = int(self.cfg[1:])
+        d["score_threshold"] = self.score
+        return d
+
+
+# --------------------------------------------------------------------------
 REGISTRY = {
     "orb":       lambda **kw: _OpenCVMethod("orb", kw.get("max_keypoints", 4096)),
     "sift":      lambda **kw: _OpenCVMethod("sift", kw.get("max_keypoints", 4096)),
     "akaze":     lambda **kw: _OpenCVMethod("akaze", kw.get("max_keypoints", 4096)),
     "xfeat_mnn": lambda **kw: XFeatMethod("xfeat_mnn", **_xf(kw)),
+    # T32 is the cheapest and the widest departure from XFeat (32-D vs 64-D);
+    # S64 matches XFeat's descriptor width, so the pair separates "the network
+    # is better" from "the descriptor is narrower".
+    "edgepoint2_t32": lambda **kw: EdgePoint2Method("edgepoint2_t32", **_ep2(kw)),
+    "edgepoint2_s32": lambda **kw: EdgePoint2Method("edgepoint2_s32", **_ep2(kw)),
+    "edgepoint2_s64": lambda **kw: EdgePoint2Method("edgepoint2_s64", **_ep2(kw)),
     "xfeat_lg":  lambda **kw: XFeatMethod("xfeat_lg", **_xf(kw)),
 }
 
@@ -284,6 +448,12 @@ def _xf(kw: dict) -> dict:
         "min_cossim": kw.get("min_cossim", 0.82),
         "threads": kw.get("threads", 0),
     }
+
+
+def _ep2(kw: dict) -> dict:
+    d = _xf(kw)
+    d["score"] = kw.get("score")          # None means EdgePoint2Method.DEFAULT_SCORE
+    return d
 
 
 def build(name: str, **kw) -> Method:

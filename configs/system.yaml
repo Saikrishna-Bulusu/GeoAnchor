@@ -79,6 +79,8 @@ data_layer:
 # ---------------------------------------------------------------------------
 processing_layer:
   method: xfeat_mnn        # orb | sift | akaze | xfeat_mnn | xfeat_lg
+                           # | edgepoint2_s64 (faster, needs its own gate --
+                           #   see CLAUDE.md; s32/t32 lose accuracy for no speed)
   max_keypoints: 4096
   min_keypoints: 30
   min_matches: 12

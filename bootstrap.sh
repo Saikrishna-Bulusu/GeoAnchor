@@ -13,7 +13,7 @@ ok(){   printf '   ok    %s\n' "$*"; }
 warn(){ printf '   note  %s\n' "$*"; }
 bad(){  printf '   FAIL  %s\n' "$*"; FAIL=1; }
 
-step "1/8  board"
+step "1/9  board"
 MODEL="$(tr -d '\0' < /proc/device-tree/model 2>/dev/null || echo unknown)"
 ARCH="$(uname -m)"
 echo "   ${MODEL}  |  ${ARCH}  |  $(nproc) cores"
@@ -39,7 +39,7 @@ else
   warn "not a Jetson. Timing and energy measured here are not board results."
 fi
 
-step "2/8  python"
+step "2/9  python"
 PYBIN="${PYTHON:-python3}"
 PYV="$($PYBIN -V 2>&1 | cut -d' ' -f2)"
 echo "   $PYBIN is $PYV"
@@ -54,7 +54,7 @@ else
   ok "Python $PYV"
 fi
 
-step "3/8  system packages"
+step "3/9  system packages"
 NEED=""
 for p in python3-venv python3-dev git build-essential; do
   dpkg -s "$p" >/dev/null 2>&1 || NEED="$NEED $p"
@@ -66,14 +66,14 @@ else
   ok "python3-venv, python3-dev, git, build-essential present"
 fi
 
-step "4/8  virtualenv"
+step "4/9  virtualenv"
 [ -d .venv ] || $PYBIN -m venv .venv || bad "venv create failed"
 # shellcheck disable=SC1091
 source .venv/bin/activate || { bad "venv activate failed"; exit 1; }
 python -m pip install -q --upgrade pip wheel setuptools
 ok "$(python -V) in $HERE/.venv"
 
-step "5/8  torch (CPU only -- this is the step that goes wrong)"
+step "5/9  torch (CPU only -- this is the step that goes wrong)"
 # ---------------------------------------------------------------------------
 # The whole pipeline is CUDA-free on purpose: the same code then runs on the
 # Pi 5, the Xavier, the Orin Nano and the 2019 Nano, so joules per fix compares
@@ -116,7 +116,7 @@ PY
   [ $? -ne 0 ] && FAIL=1
 fi
 
-step "6/8  python packages"
+step "6/9  python packages"
 PIPI=(python -m pip install --progress-bar on --timeout 120 --retries 3)
 "${PIPI[@]}" -r requirements.txt && ok "runtime requirements" || bad "requirements.txt"
 # kornia carries LighterGlue. XFeat pins 0.7.2; newer versions have changed the
@@ -129,7 +129,7 @@ PIPI=(python -m pip install --progress-bar on --timeout 120 --retries 3)
           on a machine that has it and copy the stores/ directory across; the runtime does
           not need GDAL."
 
-step "7/8  XFeat"
+step "7/9  XFeat"
 XR=""
 for c in "$HERE/xfeat" "$HERE/../third_party/accelerated_features" "$HOME/GeoAnchor/third_party/accelerated_features"; do
   [ -f "$c/modules/xfeat.py" ] && { XR="$c"; break; }
@@ -146,7 +146,26 @@ else
   warn "XFeat unavailable. orb, sift and akaze still work and need no weights."
 fi
 
-step "8/8  verify"
+step "8/9  EdgePoint2"
+# Optional. Faster than XFeat on this class of hardware and its failures are far
+# less wild (see CLAUDE.md), but every pipeline default still runs without it.
+ER=""
+for c in "$HERE/edgepoint2" "$HERE/../third_party/EdgePoint2" "$HOME/GeoAnchor/third_party/EdgePoint2"; do
+  [ -f "$c/edgepoint2.py" ] && [ -f "$c/model/model.py" ] && { ER="$c"; break; }
+done
+if [ -z "$ER" ]; then
+  echo "   cloning EdgePoint2 (MIT, ~11 MB with all 14 weight sets)"
+  git clone -q --depth 1 https://github.com/HITCSC/EdgePoint2.git "$HERE/edgepoint2" \
+    && ER="$HERE/edgepoint2" || warn "clone failed -- set EDGEPOINT2_ROOT by hand; edgepoint2_* stays unavailable"
+fi
+if [ -n "$ER" ] && [ -f "$ER/weights/S64.pth" ]; then
+  ok "EdgePoint2 at $ER"
+  export EDGEPOINT2_ROOT="$ER"
+else
+  warn "EdgePoint2 unavailable. Every other method is unaffected."
+fi
+
+step "9/9  verify"
 python scripts/preflight.py
 [ $? -ne 0 ] && FAIL=1
 
