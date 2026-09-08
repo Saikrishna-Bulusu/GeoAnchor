@@ -1314,11 +1314,53 @@ reference is a tile of Sydney.
 
 ---
 
+## Calibrating without a printer: put the board on a screen
+
+`scripts/make_chessboard.py` writes `docs/chessboard.png`; display it
+full-screen on a laptop, monitor or phone. `scripts/calibrate_camera.py`
+captures from the camera, auto-banks distinct views, calibrates and prints the
+intrinsics, with `--apply configs/camera.yaml` to write them in.
+
+A screen is a *better* target than a printed page, not a fallback: it is
+genuinely flat, where a taped print bows, and its geometry is exact.
+
+**No ruler is needed either, and that is the non-obvious part.**
+`cv2.calibrateCamera` returns fx in PIXELS, and fx is invariant to the assumed
+physical square size -- scale every object point by k and the solved
+translation scales by k while fx does not move. Verified numerically before
+relying on it: synthesised 20 views from a known K, then calibrated assuming
+square sizes of 0.025, 1.0 and 137.0, and all three returned
+`fx=1150.000 fy=1148.000 cx=632.00 cy=361.00` against a truth of exactly that.
+So the script assumes 1.0 and never asks. Only the extrinsics would need a real
+measurement, and nothing here uses them.
+
+Three things that will ruin it:
+
+- **Calibrating at the wrong resolution.** fx scales with image width, so a
+  640x480 calibration is wrong by 2x for a 1280x720 pipeline. The script
+  defaults to the data layer's 1280x720 MJPG, records the size it actually
+  negotiated, and `--apply` refuses to write into a config whose capture size
+  disagrees.
+- **Too few oblique views.** fx and Z trade off against each other in a frontal
+  view and only tilt separates them. The script rejects a view whose corners
+  have not moved far enough from one already banked, and warns if fx and fy end
+  up more than 5% apart, which is the usual symptom.
+- **Moire.** Keep the camera far enough back that squares are comfortably more
+  than ~20 px across, or the screen's pixel grid beats against the sensor's and
+  walks the detected corners around.
+
+The generated board was checked to detect flat and under three oblique warps
+(54/54 corners each), so a detection failure is the display or the geometry,
+not the pattern.
+
+---
+
 ## Open, in order
 
 1. **Calibrate the camera** and put the real `fx_px` in the config. Now the
    top item: `OVERHEAD_MS` is measured, and calibration is what blocks every
    remaining live-camera question. Do not take fx from a datasheet.
+   Tooling is written and needs only a screen -- see below.
 2. ~~**Measure `OVERHEAD_MS`**~~ -- done, 45.7 ms median / 51.3 p95. See above.
 3. **Run the top_k sweep** for `xfeat_lg`: latency on the board, accuracy on
    env80 on the Legion. A Pareto front on real hardware is contribution-shaped.

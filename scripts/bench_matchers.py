@@ -124,10 +124,28 @@ def main() -> int:
           f"{before.get('temp_c')} C, load {before.get('loadavg')}, "
           f"throttled {before.get('throttled')}")
     if not before.get("pinned"):
-        print("  WARNING: clocks are not pinned. These numbers are not comparable to\n"
-              "           another run. Jetson: sudo nvpmodel -m 0 && sudo jetson_clocks\n"
-              "           Pi 5:    echo performance | sudo tee "
-              "/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor")
+        print("  WARNING: clocks are not pinned -- and note that a 'performance'\n"
+              "           governor is NOT pinning: check scaling_min_freq ==\n"
+              "           scaling_max_freq, which is what `pinned` above reports.\n"
+              "           Jetson: sudo nvpmodel -m 0 && sudo jetson_clocks\n"
+              "           Pi 5:   echo performance | sudo tee "
+              "/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor\n"
+              "                   echo 2400000 | sudo tee "
+              "/sys/devices/system/cpu/cpu*/cpufreq/scaling_min_freq")
+    # A pinned clock on a busy board is still not a result. A Pi 5 re-run on
+    # 8 Sept came back SLOWER after being pinned -- orb 27.6 -> 33.5, xfeat_mnn
+    # detect 176 -> 254 -- which no clock change can explain. loadavg was 2.90
+    # before the run and 6.01 after, on four cores. The board was three-quarters
+    # busy with something else before the first rep. Clock and temperature were
+    # both clean, so the two checks that existed both passed.
+    cores = (before.get("board") or {}).get("cores") or os.cpu_count() or 1
+    load = before.get("loadavg")
+    if load is not None and load > 0.25 * cores:
+        print(f"  WARNING: loadavg {load:.2f} on {cores} cores before the run started.\n"
+              f"           Something else is using this board. torch will contend with it\n"
+              f"           and the multi-threaded methods will degrade far more than the\n"
+              f"           OpenCV ones, which looks exactly like a code regression.\n"
+              f"           Stop it, or run headless, before trusting these numbers.")
     print(f"{'method':<11} {'tiles':>5} {'ref kp':>7} {'detect':>8} {'match':>8} "
           f"{'total':>8} {'p95':>8}")
 
