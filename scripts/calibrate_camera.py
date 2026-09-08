@@ -148,10 +148,14 @@ def main() -> int:
     ap.add_argument("--views", type=int, default=20)
     ap.add_argument("--min-shift", type=float, default=40.0,
                     help="mean corner movement, px, before a view counts as new")
-    ap.add_argument("--min-sharpness", type=float, default=60.0,
-                    help="variance of the Laplacian below which a frame is too "
-                         "blurred to localise corners in")
-    ap.add_argument("--max-motion", type=float, default=2.0,
+    ap.add_argument("--sharp-frac", type=float, default=0.75,
+                    help="reject a frame whose Laplacian variance is below this "
+                         "fraction of the camera's own median. RELATIVE on "
+                         "purpose: an absolute threshold is not comparable "
+                         "between cameras, scenes or lighting. 0 disables it.")
+    ap.add_argument("--sharp-baseline-n", type=int, default=15,
+                    help="detections used to learn that median before gating")
+    ap.add_argument("--max-motion", type=float, default=4.0,
                     help="mean corner movement, px, between two consecutive "
                          "detections for the board to count as held still")
     ap.add_argument("--max-rms", type=float, default=1.0,
@@ -193,6 +197,9 @@ def main() -> int:
     banked_obj: list = []
     tilts: list = []
     prev_corners = None
+    sharp_seen: list = []
+    sharp_gate = None
+    rejected = {"blurred": 0, "moving": 0, "too similar": 0, "tilt already covered": 0}
     objp = object_points(nx, ny)
     frames = []
     t0 = time.time()
@@ -222,12 +229,26 @@ def main() -> int:
         # lands in the set looking like every other one. Two such views out of
         # 22 took a run from 0.7 px to 2.79 px rms on 8 Sept, because rms is
         # over POINTS and a couple of bad views dominate it.
+        #
+        # THE THRESHOLD MUST BE RELATIVE. The first version used an absolute
+        # 60, which rejected 100% of frames from the C270 this was written for
+        # -- that camera's Laplacian variance on a normal scene is about 45,
+        # and the run banked zero views and exited without writing anything.
+        # Absolute sharpness depends on the sensor, the lens, the scene and the
+        # lighting, and is not comparable between any two of them. What IS
+        # comparable is a frame against the same camera's own typical frame, so
+        # the first `sharp_baseline_n` detections set the reference and the
+        # gate is a fraction of their median.
         sharp = cv2.Laplacian(gray, cv2.CV_64F).var()
-        if sharp < a.min_sharpness:
-            if time.time() - last_note > 4.0:
-                print(f"  [{time.time()-t0:5.0f}s] too blurred to trust "
-                      f"(sharpness {sharp:.0f} < {a.min_sharpness:.0f}) -- hold still")
-                last_note = time.time()
+        sharp_seen.append(sharp)
+        if len(sharp_seen) < a.sharp_baseline_n:
+            sharp_gate = None                     # still learning: let it through
+        elif sharp_gate is None:
+            sharp_gate = a.sharp_frac * float(np.median(sharp_seen))
+            print(f"  sharpness baseline {np.median(sharp_seen):.0f}, "
+                  f"rejecting below {sharp_gate:.0f}")
+        if sharp_gate is not None and sharp < sharp_gate:
+            rejected["blurred"] += 1
             prev_corners = corners
             continue
 
@@ -239,6 +260,7 @@ def main() -> int:
             moved = np.linalg.norm(corners.reshape(-1, 2) -
                                    prev_corners.reshape(-1, 2), axis=1).mean()
             if moved > a.max_motion:
+                rejected["moving"] += 1
                 prev_corners = corners
                 continue
         else:
@@ -257,12 +279,14 @@ def main() -> int:
                  (ty >= a.min_tilt and cov["left"] < need) or
                  (ty <= -a.min_tilt and cov["right"] < need))
         if enough and not fills:
+            rejected["tilt already covered"] += 1
             if time.time() - last_note > 4.0:
                 print(f"  [{time.time()-t0:5.0f}s] {len(banked_img)} views, but "
                       f"{_cov(cov, need)} -- TILT the camera that way")
                 last_note = time.time()
             continue
         if not novelty(corners, banked_img, a.min_shift):
+            rejected["too similar"] += 1
             continue
         banked_img.append(corners)
         banked_obj.append(objp)
@@ -281,12 +305,44 @@ def main() -> int:
         print("           separate focal length from distance without perspective,")
         print("           so this may still solve to a nonsense focal length.")
 
+    turned = ", ".join(f"{k} {v}" for k, v in rejected.items() if v) or "none"
+    print(f"\ndetections {seen}, banked {len(banked_img)}. "
+          f"Frames turned away: {turned}")
+
     if len(banked_img) < 6:
+        # ALWAYS leave something behind. The first version returned here without
+        # writing anything, so a run that banked nothing produced no file, the
+        # stale one from the previous attempt was still sitting there looking
+        # current, and the only symptom was "it still says unusable". A run that
+        # captured nothing is exactly the run whose diagnostics are worth
+        # keeping.
+        Path(a.json).parent.mkdir(parents=True, exist_ok=True)
+        Path(a.json).write_text(json.dumps(
+            {"usable": False,
+             "rejected_because": [f"only {len(banked_img)} usable views banked "
+                                  f"from {seen} detections"],
+             "detections": seen, "banked": len(banked_img),
+             "frames_turned_away": rejected,
+             "sharpness_gate": sharp_gate,
+             "sharpness_observed_median":
+                 float(np.median(sharp_seen)) if sharp_seen else None,
+             "device": a.device, "width": got_w, "height": got_h,
+             "pattern": [nx, ny]}, indent=2))
         print(f"\nonly {len(banked_img)} views ({seen} detections). "
               f"Need at least 6, ideally {max(a.views, 15)}.")
-        print("If nothing was detected at all: check the pattern size (--pattern counts")
-        print("INNER corners, so a 10x7-square board is '9 6'), the screen brightness,")
-        print("and that the whole board including a margin of background is in frame.")
+        if rejected["blurred"] > seen * 0.5:
+            print("\nMost frames were turned away as blurred. If the board looked")
+            print("sharp to you, the gate is wrong rather than the frames -- re-run")
+            print("with --sharp-frac 0.5, or --sharp-frac 0 to disable it.")
+        elif rejected["moving"] > seen * 0.5:
+            print("\nMost frames were turned away as still moving. Pause for about")
+            print("a second on each pose, or re-run with --max-motion 8.")
+        elif seen == 0:
+            print("\nThe board was never detected at all. Check --pattern counts")
+            print("INNER corners (a 10x7-square board is '9 6'), that the whole")
+            print("board plus a margin of background is in frame, and the screen")
+            print("brightness.")
+        print(f"\nwrote diagnostics to {a.json}")
         return 1
 
     print(f"\ncalibrating on {len(banked_img)} views...")
