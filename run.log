@@ -1,0 +1,44 @@
+config   configs/system.yaml
+run dir  /home/sai/geoanchor-rt/runs/20260908T025414Z_sydney_replay
+layers   data,processing,output, api
+
+  output      pid 16377   -> /home/sai/geoanchor-rt/runs/20260908T025414Z_sydney_replay/output.out
+  processing  pid 16378   -> /home/sai/geoanchor-rt/runs/20260908T025414Z_sydney_replay/processing.out
+  api         pid 16379   -> /home/sai/geoanchor-rt/runs/20260908T025414Z_sydney_replay/api.out
+  data        pid 16418   -> /home/sai/geoanchor-rt/runs/20260908T025414Z_sydney_replay/data.out
+
+running. Ctrl-C to stop.  Dashboard API: http://172.19.134.138:8000
+
+  data exited (rc 0) -- the other layers are still running
+
+stopping (reverse order, so the session file flushes last)
+  TERM api
+  TERM processing
+  TERM output
+
+session: /home/sai/geoanchor-rt/runs/20260908T025414Z_sydney_replay
+  api.out
+  data.jsonl
+  data.out
+  output.jsonl
+  output.out
+  processing.jsonl
+  processing.out
+  records.jsonl
+  session.json
+  output exited (rc 0) -- the other layers are still running
+  processing exited (rc 0) -- the other layers are still running
+  api exited (rc 143) -- the other layers are still running
+
+stopping (reverse order, so the session file flushes last)
+
+session: /home/sai/geoanchor-rt/runs/20260908T025414Z_sydney_replay
+  api.out
+  data.jsonl
+  data.out
+  output.jsonl
+  output.out
+  processing.jsonl
+  processing.out
+  records.jsonl
+  session.json

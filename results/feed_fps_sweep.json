@@ -1,0 +1,62 @@
+[
+  {
+    "fps": 2.0,
+    "run_dir": "/home/sai/geoanchor-rt/runs/20260908T031451Z_fpssweep_2p0",
+    "n": 168,
+    "fixes_per_s": 1.68,
+    "compute_med": 428.145,
+    "latency_med": 482.945,
+    "latency_p95": 1116.5085000000001,
+    "staleness_med": 14.264999999999986,
+    "staleness_p95": 433.51750000000004,
+    "err_m_med": 0.0057
+  },
+  {
+    "fps": 4.0,
+    "run_dir": "/home/sai/geoanchor-rt/runs/20260908T031633Z_fpssweep_4p0",
+    "n": 200,
+    "fixes_per_s": 2.0,
+    "compute_med": 422.275,
+    "latency_med": 580.355,
+    "latency_p95": 939.9395,
+    "staleness_med": 147.14000000000001,
+    "staleness_p95": 241.29699999999988,
+    "err_m_med": 0.0057
+  },
+  {
+    "fps": 8.0,
+    "run_dir": "/home/sai/geoanchor-rt/runs/20260908T031814Z_fpssweep_8p0",
+    "n": 190,
+    "fixes_per_s": 1.9,
+    "compute_med": 433.595,
+    "latency_med": 496.275,
+    "latency_p95": 863.4049999999999,
+    "staleness_med": 67.555,
+    "staleness_p95": 117.53349999999996,
+    "err_m_med": 0.0059
+  },
+  {
+    "fps": 16.0,
+    "run_dir": "/home/sai/geoanchor-rt/runs/20260908T031955Z_fpssweep_16p0",
+    "n": 182,
+    "fixes_per_s": 1.82,
+    "compute_med": 463.235,
+    "latency_med": 507.09000000000003,
+    "latency_p95": 993.4839999999999,
+    "staleness_med": 45.09499999999997,
+    "staleness_p95": 325.3074999999997,
+    "err_m_med": 0.0068
+  },
+  {
+    "fps": 30.0,
+    "run_dir": "/home/sai/geoanchor-rt/runs/20260908T032136Z_fpssweep_30p0",
+    "n": 147,
+    "fixes_per_s": 1.47,
+    "compute_med": 534.76,
+    "latency_med": 797.46,
+    "latency_p95": 1417.2399999999998,
+    "staleness_med": 239.88,
+    "staleness_p95": 662.1489999999995,
+    "err_m_med": 0.0085
+  }
+]
