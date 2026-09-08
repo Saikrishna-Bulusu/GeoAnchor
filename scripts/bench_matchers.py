@@ -15,6 +15,8 @@ boards can be compared on the same row. Run it on each board and diff.
 """
 import argparse
 import json
+import os
+import platform
 import statistics
 import sys
 import time
@@ -25,8 +27,52 @@ import cv2
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
+from geoanchor import device                       # noqa: E402
 from geoanchor import methods                       # noqa: E402
 from geoanchor.data_layer.store import FeatureStore  # noqa: E402
+
+
+def conditions() -> dict:
+    """Everything that makes two runs of this script comparable, or not.
+
+    Added 8 Sept 2026 after a Pi 5 re-run came back with orb and akaze
+    unchanged (1.02-1.11x) but every torch method 1.34-1.65x slower. That is
+    not a code change -- xfeat never touches the matcher that changed -- it is
+    the board being in a different state, and NOTHING in the output said so.
+    The earlier run's conditions survived only because they happened to be
+    typed into a commit message. A number without its clock is not a result.
+
+    OpenCV methods drifting far less than torch ones is the signature to look
+    for: short single-threaded work rides out a thermal or contention problem
+    that sustained multi-threaded work does not.
+    """
+    import torch
+    c = {"torch": torch.__version__, "torch_threads": torch.get_num_threads(),
+         "machine": platform.machine()}
+    try:
+        b = device.detect()
+        c["board"] = {"kind": b.kind, "model": b.model, "cores": b.cores}
+    except Exception:
+        pass
+    # Pinned means min == max. An unpinned governor is the single most common
+    # reason two runs of this script disagree.
+    cpu = Path("/sys/devices/system/cpu/cpu0/cpufreq")
+    for key, f in (("governor", "scaling_governor"), ("min_khz", "scaling_min_freq"),
+                   ("max_khz", "scaling_max_freq"), ("cur_khz", "scaling_cur_freq")):
+        try:
+            c[key] = (cpu / f).read_text().strip()
+        except OSError:
+            pass
+    if "min_khz" in c and "max_khz" in c:
+        c["pinned"] = c["min_khz"] == c["max_khz"]
+    try:
+        c["loadavg"] = os.getloadavg()[0]
+    except OSError:
+        pass
+    c["temp_c"] = device.read_temp_c()
+    c["throttled"] = device.throttled()      # Pi: 0x0 is clean; None elsewhere
+    c["power_w"] = device.read_power_w(device.detect())
+    return c
 
 # The frame the pipeline actually matches: one demo frame, rescaled to the
 # reference GSD exactly as the data layer does it (DL-13).
@@ -70,9 +116,18 @@ def main() -> int:
     a = ap.parse_args()
 
     frame = load_frame(Path(a.video))
-    import torch  # after methods, so the thread count below is the real one
-    print(f"frame {frame.shape[1]}x{frame.shape[0]}  torch threads {torch.get_num_threads()}  "
-          f"reps {a.reps}")
+    before = conditions()
+    print(f"frame {frame.shape[1]}x{frame.shape[0]}  torch threads "
+          f"{before.get('torch_threads')}  reps {a.reps}")
+    print(f"board  {before.get('governor', '?')} governor, "
+          f"{'PINNED' if before.get('pinned') else 'NOT PINNED'}, "
+          f"{before.get('temp_c')} C, load {before.get('loadavg')}, "
+          f"throttled {before.get('throttled')}")
+    if not before.get("pinned"):
+        print("  WARNING: clocks are not pinned. These numbers are not comparable to\n"
+              "           another run. Jetson: sudo nvpmodel -m 0 && sudo jetson_clocks\n"
+              "           Pi 5:    echo performance | sudo tee "
+              "/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor")
     print(f"{'method':<11} {'tiles':>5} {'ref kp':>7} {'detect':>8} {'match':>8} "
           f"{'total':>8} {'p95':>8}")
 
@@ -111,10 +166,22 @@ def main() -> int:
                      "match_ms": round(mat, 1), "total_ms": round(det + mat, 1),
                      "total_p95_ms": round(det95 + mat95, 1)})
 
+    after = conditions()
+    drift = ""
+    if before.get("temp_c") and after.get("temp_c"):
+        d = after["temp_c"] - before["temp_c"]
+        drift = f"  (+{d:.1f} C over the run)" if d > 0 else f"  ({d:.1f} C over the run)"
+    print(f"\nend    {after.get('temp_c')} C{drift}, throttled {after.get('throttled')}")
+
     if a.json:
         Path(a.json).write_text(json.dumps(
-            {"frame": list(frame.shape[:2]), "reps": a.reps, "rows": rows}, indent=2))
-        print(f"\nwrote {a.json}")
+            {"frame": list(frame.shape[:2]), "reps": a.reps,
+             # Both ends, because a board that was cool at the start and
+             # throttling by the end produces a table where the last rows are
+             # not comparable to the first ones either.
+             "conditions_before": before, "conditions_after": after,
+             "rows": rows}, indent=2))
+        print(f"wrote {a.json}")
     return 0
 
 

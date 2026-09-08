@@ -616,6 +616,61 @@ pacer keeps the prior warm and the tile count low. That is the honest headline:
 a 2x discontinuity that the prior's tile count was choosing at random, and on
 the Pi 5 it is worth 2-4x on the match half at every geometry that matters.
 
+### The Pi's confirming run, and why its absolute numbers are not usable
+
+`results/bench_matchers_pi5_postfix.json`, taken after the fix. The match half
+did what the curve predicted: `edgepoint2_s64` at 2048 went 89.1 -> 38.9 ms,
+and every edgepoint2 row moved the same way (0.34-0.67x).
+
+**But the run is not comparable to the pre-fix one**, and the tell is in the
+methods the change cannot touch, because `xfeat` never calls
+`EdgePoint2Method.match`:
+
+    method       refkp   detect x   match x
+    orb           2048       1.02       1.05
+    akaze         2048       1.06       1.11
+    sift          2048       1.18       1.13
+    xfeat_mnn     2048       1.65       1.69
+    xfeat_lg      2048       1.56       1.31
+
+OpenCV barely moved; every torch path is 1.3-1.7x slower. That is not a code
+change, it is the board in a different state -- short single-threaded work
+rides out a thermal or contention problem that sustained multi-threaded work
+does not. The pre-fix run recorded `performance` governor, idle, 0x0 throttled,
+51.6 C; the post-fix file recorded no conditions at all, because the script did
+not capture any.
+
+Two things follow.
+
+**The fix is bigger than it measured.** Normalising by the torch-path drift
+(1.39x, median of the xfeat detect ratios) puts the real improvement at 3.18x,
+against the synthetic curve's predicted 3.41x at N=2048. Those agree.
+
+**Within-run comparisons still hold, cross-run ones do not.** On the same run,
+`edgepoint2_s64` total is now 252.7 ms against `xfeat_mnn`'s 341.5, where
+before the fix it was 272.5 against 206.7. The reversal against xfeat is
+genuinely gone. Comparing 252.7 to the Xavier's 223.9 is NOT valid from this
+run and needs a pinned re-run.
+
+### `scripts/bench_matchers.py` now records the clock, because this cost a run
+
+It prints governor, pinned state (`scaling_min_freq == scaling_max_freq`),
+temperature, load and throttle flags before the table, **warns loudly when the
+clocks are not pinned**, and writes `conditions_before` and `conditions_after`
+into the JSON so a board that heated up mid-run is visible afterwards.
+
+It caught the Xavier on its first run: `schedutil`, NOT PINNED, 3.5 hours
+uptime. `nvpmodel -m 0` had survived the reboot and `jetson_clocks` had not --
+exactly the trap already documented under "Board notes", found again because
+nothing was checking. Every Xavier number in this session's WIDE_REF work was
+taken unpinned. The DIRECTION survives it (both matcher forms were timed
+back-to-back in one process, all six deltas have the same sign, and the Pi
+agrees independently) but the magnitudes need a pinned re-run before they are
+quoted anywhere.
+
+**A number without its clock is not a result.** That is why this is in the
+script now rather than in a commit message.
+
 ### On ARM, XFeat is slower than SIFT -- on both boards
 
 XFeat's own README claims it is "faster than SIFT on CPU", and the paper's CPU
