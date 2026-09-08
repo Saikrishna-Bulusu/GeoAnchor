@@ -151,6 +151,13 @@ Then, in order of what the project actually needs:
 
 1. `edgepoint2_s64` at 1 tile and at 9 tiles, so the Pi has both the
    like-geometry row and the deployed-geometry row.
+1. **Re-measure `feed.fps`. Do not inherit the Xavier's `2`.** It is tuned to
+   a ~410 ms fix; if the Pi matches in 250 ms the right value is 4. The curve
+   is not monotonic -- staleness falls from 4 to 16 fps because the drain
+   conflates to the newest frame, then reverses when the data layer's encoding
+   starts stealing cores from the matcher. The sweep table and the reasoning
+   are in the `feed:` block of `configs/system.yaml`; run the same five arms
+   (`loop: true`, 100 s each) and set the Pi's value from its own numbers.
 2. Re-measure `WIDE_REF`: sweep reference size across the one-matmul /
    two-matmul crossover and find where the Pi's cache flips it.
 3. `OVERHEAD_MS`, if a camera is available. Capture to first byte at the

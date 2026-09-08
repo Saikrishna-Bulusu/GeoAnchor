@@ -771,6 +771,51 @@ Reproduce with: `bash run.sh --no-api`, then sum `stage_ms` per record from
 `runs/<id>/records.jsonl` (excluding `tiles_fitted`, which is a count) and
 subtract from `latency_ms`.
 
+### The feed rate curve is not monotonic, and 2 fps is a Xavier number
+
+The obvious conclusion from the two rows above -- "set fps to what the board
+sustains" -- is right, but the mechanism is not what it looks like and the
+curve has two sides. Swept on the Xavier, sydney replay, `edgepoint2_s64`,
+`loop: true`, 100 s per arm, first five fixes dropped:
+
+    fps   n    fixes/s   compute   latency   lat p95   staleness   p95     err_m med
+      2   185     2.01     379.0     390.6     454.2        12.1    16.7      0.0057
+      4   240     2.60     370.0     506.5     633.4       136.0   248.3      0.0057
+      8   229     2.49     388.2     462.7     547.1        66.5   120.1      0.0059
+     16   204     2.23     435.1     482.0     611.1        45.3   129.7      0.0057
+     30   171     1.87     517.9     712.5    1024.7       190.2   480.1      0.0059
+
+Staleness **falls** from 4 fps to 16 fps, which contradicts a naive queueing
+story and confirms the conflating one: `drain(keep_latest_of=[T_FRAME])` keeps
+only the newest queued frame, so a faster publisher means the newest frame is
+younger when the loop finally picks it up. 136 ms at 4 fps is just the mean age
+of a frame published every 250 ms; at 16 fps that age is 45 ms.
+
+It reverses at 30 fps because the data layer is then reading and JPEG-encoding
+30 frames a second that nobody will match, and it does that on the same eight
+cores. Compute itself rises 379 -> 518 ms, and p95 error degrades (0.14 m
+against a flat 0.006 m everywhere else). **The producer competing with the
+consumer is the ceiling, not the queue.**
+
+So there are two defensible settings and they optimise different things:
+
+- **2 fps: minimum latency** (390.6 ms), at the cost of 23% of the fix rate.
+  Chosen as the default, because latency is this project's binding constraint
+  and rate is not -- ArduPilot's ExternalNav has no minimum-rate check above
+  1 Hz, and 2.01 fixes/s has margin.
+- **8 fps: the balanced point.** Half the staleness of 4 fps with 96% of its
+  throughput. Switch to this if fix rate ever becomes the constraint.
+
+4 fps -- the video's native rate, and the previous default -- is the worst of
+the three: it publishes slowly enough to be stale but fast enough to queue.
+
+**Do not inherit `fps: 2` onto another board.** It is correct where a fix costs
+~410 ms. A board that matches in 250 ms wants 4. Re-run this sweep rather than
+copying the number; `configs/system.yaml` carries the table for that reason.
+The portable fix -- have the data layer pace itself to the processing layer's
+observed rate instead of a hardcoded constant -- is not written, and is the
+obvious thing to do if a third board turns up.
+
 ---
 
 ## Latency, and why it is the binding constraint
