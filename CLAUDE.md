@@ -567,13 +567,54 @@ it costs ~214 against ~148. **The prior's tile count decides which side of a 2x
 discontinuity each frame lands on**, which is the worst possible property for a
 latency budget, and it is invisible in a median.
 
-**Recommendation, not yet applied: drop `WIDE_REF` and always take the
-two-matmul form, as XFeat does.** It costs about 36 ms at the current operating
-point on the Xavier and buys back predictability, removes the 66 ms penalty at
-13 tiles, and should remove the Pi's 3x small-N penalty outright. Confirm on
-the Pi first -- its torch version dispatches its own kernels and the window may
-sit somewhere else entirely. `python scripts/wide_ref_sweep.py --json
-results/wide_ref_pi5.json` prints that board's curve in one command.
+### Applied: `WIDE_REF` is gone, the matcher always takes the second GEMM
+
+The Pi 5 curve came back (`results/wide_ref_pi5.json`, torch 2.10.0+cpu, 4
+threads) and settled it. Two-matmul wins 8 of 10 sizes there, and the margins
+are not close:
+
+    N        Pi one    Pi two   ratio  |  Xav one   Xav two   ratio
+    1024      23.38      7.80    3.00  |    17.17     16.55    1.04
+    2048      52.27     15.33    3.41  |    23.76     20.30    1.17
+    8192     264.29     84.18    3.14  |    87.99     56.80    1.55
+    16000    310.03    149.49    2.07  |    71.50     87.37    0.82
+    25600    965.50    231.94    4.16  |   209.17    140.34    1.49
+    32768   2019.59    443.59    4.55  |   357.36    168.51    2.12
+    51200   1947.04    484.30    4.02  |   427.20    272.03    1.57
+
+Same non-monotonic signature, four times more violent. The two sizes where
+one-matmul edges ahead on the Pi (12000, 20000) sit between neighbours at 264
+and 310 ms; they are the same kernel-dispatch artifact, not a regime to build
+on.
+
+**Then the real store contradicted the synthetic sweep, and the real store
+wins.** Re-measured on `ref_tile__edgepoint2_s64`, actual descriptors, actual
+frame, Xavier at MAXN -- matches identical at every size:
+
+    tiles  ref kp   max(dim=0)   2nd GEMM    delta
+        1    2048         21.1       19.5     -1.6
+        4    8192         85.9       51.5    -34.4
+        9   18432        166.4      123.2    -43.3
+       10   20480        226.7      113.5   -113.2
+       13   26624        224.7      153.3    -71.4
+       25   51200        448.3      332.1   -116.1
+
+Two-matmul is faster at **every** geometry, including the 9-10 tile band where
+the synthetic sweep predicted it would lose by 36 ms. Synthetic descriptors
+have the right shape and dtype but not the real store's memory layout, and at
+these sizes that is what the reduction kernel is reacting to. **Trust the store
+measurement over the synthetic one** -- the sweep script is still the right
+tool for spotting the discontinuity, but not for choosing the operating point.
+
+So `WIDE_REF` is deleted rather than retuned, and `EdgePoint2Method.match`
+always pays for the second GEMM, as XFeat's own matcher does.
+
+End to end on the Xavier replay the change is small -- match 145.8 -> 142.4 ms
+median, latency 409.4 -> 403.3, accuracy and error unchanged -- because the
+pacer keeps the prior warm and the tile count low. That is the honest headline:
+**on this board, in this replay, it is a wash.** What it buys is the removal of
+a 2x discontinuity that the prior's tile count was choosing at random, and on
+the Pi 5 it is worth 2-4x on the match half at every geometry that matters.
 
 ### On ARM, XFeat is slower than SIFT -- on both boards
 

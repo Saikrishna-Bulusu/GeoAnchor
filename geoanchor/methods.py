@@ -323,7 +323,6 @@ class EdgePoint2Method(Method):
     # the AGX Xavier's, and it must be re-measured on a Pi 5 or a TX2 rather
     # than assumed. Getting it wrong costs tens of milliseconds, never
     # correctness -- both forms return identical index sets.
-    WIDE_REF = 20000
 
     def __init__(self, name: str = "edgepoint2_t32", max_keypoints: int = 4096,
                  min_cossim: float = 0.82, threads: int = 0, score: float = None):
@@ -415,23 +414,38 @@ class EdgePoint2Method(Method):
         da = torch.from_numpy(fa.desc)
         db = torch.from_numpy(fb.desc)
         with torch.inference_mode():
+            # Mutual-nearest-neighbour needs the argmax along BOTH axes, and
+            # the second one has two forms: reduce the existing matrix the
+            # other way (max(dim=0)), or pay for a second GEMM and reduce that
+            # along the contiguous axis. This used to pick between them on
+            # reference size, via WIDE_REF. That was wrong in shape, not just
+            # in value -- see CLAUDE.md. max(dim=0) is not monotonic in N,
+            # because torch dispatches different reduction kernels by shape:
+            # on this frame's real store it costs 227 ms at 10 tiles and
+            # 166 ms at 9, and on a Pi 5 it reaches 2019 ms at N=32768 against
+            # the second GEMM's 444. Which side of that discontinuity a frame
+            # lands on is decided by how many tiles the prior selects, which is
+            # the worst possible input to a latency budget.
+            #
+            # So: always the second GEMM, which is what XFeat's own matcher
+            # does (xfeat/modules/xfeat.py:328). Measured on the real store,
+            # identical matches at every size, Xavier at MAXN:
+            #
+            #     tiles  ref kp   max(dim=0)   2nd GEMM    delta
+            #         1    2048         21.1       19.5     -1.6
+            #         4    8192         85.9       51.5    -34.4
+            #         9   18432        166.4      123.2    -43.3
+            #        10   20480        226.7      113.5   -113.2
+            #        13   26624        224.7      153.3    -71.4
+            #        25   51200        448.3      332.1   -116.1
+            #
+            # Faster at every geometry on both boards, and monotonic. The
+            # synthetic sweep in scripts/wide_ref_sweep.py showed a window
+            # where max(dim=0) won; it does not survive contact with the real
+            # store's descriptor layout, so trust the store measurement.
             cossim = da @ db.T
             best, m12 = cossim.max(dim=1)
-            if len(fb) > self.WIDE_REF:
-                # Reducing the OTHER way needs max(dim=0), which walks a
-                # (Q, N) row-major tensor across its stride. Past a threshold
-                # that falls off a cliff -- measured on an AGX Xavier at pinned
-                # clocks, Q=4096: 116 ms at N=16000 but 402 ms at N=22528 --
-                # so above it, pay for a second matmul and reduce that along
-                # the contiguous axis instead. At N=51200 that is 884 -> 610 ms.
-                # XFeat's matcher always does this; always doing it is wrong,
-                # because BELOW the cliff the extra matmul costs more than the
-                # strided reduction saves (N=11589: 87 ms one-matmul against
-                # 118 ms two-matmul). Chunking to bound the working set was
-                # tried and is worse than both at every size.
-                _, m21 = (db @ da.T).max(dim=1)
-            else:
-                _, m21 = cossim.max(dim=0)
+            _, m21 = (db @ da.T).max(dim=1)
             idx1 = torch.arange(len(m12))
             keep = (m21[m12] == idx1) & (best > self.min_cossim)
             idx1, idx2, conf = idx1[keep], m12[keep], best[keep]
