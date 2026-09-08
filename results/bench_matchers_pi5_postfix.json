@@ -4,166 +4,204 @@
     646
   ],
   "reps": 15,
+  "conditions_before": {
+    "torch": "2.10.0+cpu",
+    "torch_threads": 4,
+    "machine": "aarch64",
+    "board": {
+      "kind": "pi",
+      "model": "Raspberry Pi 5 Model B Rev 1.0",
+      "cores": 4
+    },
+    "governor": "performance",
+    "min_khz": "2400000",
+    "max_khz": "2400000",
+    "cur_khz": "2400000",
+    "pinned": true,
+    "loadavg": 2.9033203125,
+    "temp_c": 49.6,
+    "throttled": "0x0",
+    "power_w": 3.027
+  },
+  "conditions_after": {
+    "torch": "2.10.0+cpu",
+    "torch_threads": 4,
+    "machine": "aarch64",
+    "board": {
+      "kind": "pi",
+      "model": "Raspberry Pi 5 Model B Rev 1.0",
+      "cores": 4
+    },
+    "governor": "performance",
+    "min_khz": "2400000",
+    "max_khz": "2400000",
+    "cur_khz": "2400000",
+    "pinned": true,
+    "loadavg": 6.0107421875,
+    "temp_c": 57.3,
+    "throttled": "0x0",
+    "power_w": 2.13
+  },
   "rows": [
     {
       "method": "akaze",
       "store": "satellite_map__akaze__93d153e7078fb28d",
       "tiles": 1,
       "ref_keypoints": 2048,
-      "detect_ms": 60.6,
-      "match_ms": 20.0,
-      "total_ms": 80.6,
-      "total_p95_ms": 92.4
+      "detect_ms": 64.3,
+      "match_ms": 17.0,
+      "total_ms": 81.3,
+      "total_p95_ms": 95.2
     },
     {
       "method": "edgepoint2_s32",
       "store": "satellite_map__edgepoint2_s32__069f8d1f20c45cb2",
       "tiles": 1,
       "ref_keypoints": 2048,
-      "detect_ms": 204.3,
-      "match_ms": 34.3,
-      "total_ms": 238.6,
-      "total_p95_ms": 285.8
+      "detect_ms": 215.7,
+      "match_ms": 34.5,
+      "total_ms": 250.3,
+      "total_p95_ms": 301.5
     },
     {
       "method": "edgepoint2_s64",
       "store": "satellite_map__edgepoint2_s64__568f260bd01c9aff",
       "tiles": 1,
       "ref_keypoints": 4096,
-      "detect_ms": 227.7,
-      "match_ms": 72.2,
-      "total_ms": 299.9,
-      "total_p95_ms": 373.9
+      "detect_ms": 214.5,
+      "match_ms": 63.7,
+      "total_ms": 278.1,
+      "total_p95_ms": 340.5
     },
     {
       "method": "edgepoint2_s64",
       "store": "satellite_map__edgepoint2_s64__9ffc3419a7b87183",
       "tiles": 1,
       "ref_keypoints": 512,
-      "detect_ms": 240.4,
-      "match_ms": 13.2,
-      "total_ms": 253.6,
-      "total_p95_ms": 281.6
+      "detect_ms": 230.7,
+      "match_ms": 12.0,
+      "total_ms": 242.8,
+      "total_p95_ms": 291.5
     },
     {
       "method": "edgepoint2_s64",
       "store": "satellite_map__edgepoint2_s64__aeb342a97572c941",
       "tiles": 1,
       "ref_keypoints": 1024,
-      "detect_ms": 215.2,
-      "match_ms": 15.9,
-      "total_ms": 231.1,
-      "total_p95_ms": 286.3
+      "detect_ms": 278.3,
+      "match_ms": 24.8,
+      "total_ms": 303.1,
+      "total_p95_ms": 353.7
     },
     {
       "method": "edgepoint2_s64",
       "store": "satellite_map__edgepoint2_s64__e9fac76a66a95636",
       "tiles": 1,
       "ref_keypoints": 2048,
-      "detect_ms": 213.8,
-      "match_ms": 38.9,
-      "total_ms": 252.7,
-      "total_p95_ms": 294.1
+      "detect_ms": 237.6,
+      "match_ms": 42.8,
+      "total_ms": 280.4,
+      "total_p95_ms": 317.3
     },
     {
       "method": "edgepoint2_t32",
       "store": "satellite_map__edgepoint2_t32__ade20297cdb54d77",
       "tiles": 1,
       "ref_keypoints": 2048,
-      "detect_ms": 182.3,
-      "match_ms": 34.5,
-      "total_ms": 216.8,
-      "total_p95_ms": 271.9
+      "detect_ms": 199.1,
+      "match_ms": 39.8,
+      "total_ms": 238.9,
+      "total_p95_ms": 295.0
     },
     {
       "method": "orb",
       "store": "satellite_map__orb__f117c1bc75a30312",
       "tiles": 1,
       "ref_keypoints": 2048,
-      "detect_ms": 28.1,
-      "match_ms": 31.2,
-      "total_ms": 59.3,
-      "total_p95_ms": 78.1
+      "detect_ms": 33.5,
+      "match_ms": 34.4,
+      "total_ms": 67.9,
+      "total_p95_ms": 76.2
     },
     {
       "method": "sift",
       "store": "satellite_map__sift__d6991dcfd17b50dd",
       "tiles": 1,
       "ref_keypoints": 2048,
-      "detect_ms": 100.7,
-      "match_ms": 76.8,
-      "total_ms": 177.5,
-      "total_p95_ms": 210.2
+      "detect_ms": 103.5,
+      "match_ms": 80.2,
+      "total_ms": 183.7,
+      "total_p95_ms": 211.5
     },
     {
       "method": "xfeat_lg",
       "store": "satellite_map__xfeat_lg__2fec74c30cf8d803",
       "tiles": 1,
       "ref_keypoints": 512,
-      "detect_ms": 234.1,
-      "match_ms": 1582.4,
-      "total_ms": 1816.5,
-      "total_p95_ms": 2016.8
+      "detect_ms": 245.2,
+      "match_ms": 1600.6,
+      "total_ms": 1845.8,
+      "total_p95_ms": 2180.0
     },
     {
       "method": "xfeat_lg",
       "store": "satellite_map__xfeat_lg__daacdf17f7d68b19",
       "tiles": 1,
       "ref_keypoints": 1024,
-      "detect_ms": 235.4,
-      "match_ms": 2146.7,
-      "total_ms": 2382.1,
-      "total_p95_ms": 2647.4
+      "detect_ms": 253.4,
+      "match_ms": 2263.7,
+      "total_ms": 2517.1,
+      "total_p95_ms": 2769.8
     },
     {
       "method": "xfeat_lg",
       "store": "satellite_map__xfeat_lg__e98187521b1622a3",
       "tiles": 1,
       "ref_keypoints": 2048,
-      "detect_ms": 263.5,
-      "match_ms": 3116.2,
-      "total_ms": 3379.7,
-      "total_p95_ms": 3678.5
+      "detect_ms": 312.2,
+      "match_ms": 3325.8,
+      "total_ms": 3638.0,
+      "total_p95_ms": 3813.3
     },
     {
       "method": "xfeat_mnn",
       "store": "satellite_map__xfeat_mnn__02f7ac091dc857cb",
       "tiles": 1,
       "ref_keypoints": 2048,
-      "detect_ms": 289.9,
-      "match_ms": 51.7,
-      "total_ms": 341.5,
-      "total_p95_ms": 404.2
+      "detect_ms": 253.9,
+      "match_ms": 55.7,
+      "total_ms": 309.7,
+      "total_p95_ms": 348.9
     },
     {
       "method": "xfeat_mnn",
       "store": "satellite_map__xfeat_mnn__1ece2dfa0111c4c8",
       "tiles": 1,
       "ref_keypoints": 4096,
-      "detect_ms": 251.1,
-      "match_ms": 74.6,
-      "total_ms": 325.7,
-      "total_p95_ms": 393.8
+      "detect_ms": 330.7,
+      "match_ms": 79.1,
+      "total_ms": 409.8,
+      "total_p95_ms": 453.3
     },
     {
       "method": "xfeat_mnn",
       "store": "satellite_map__xfeat_mnn__2e3c4b30cdad01a8",
       "tiles": 1,
       "ref_keypoints": 512,
-      "detect_ms": 229.1,
-      "match_ms": 12.0,
-      "total_ms": 241.1,
-      "total_p95_ms": 272.5
+      "detect_ms": 248.7,
+      "match_ms": 17.4,
+      "total_ms": 266.0,
+      "total_p95_ms": 323.0
     },
     {
       "method": "xfeat_mnn",
       "store": "satellite_map__xfeat_mnn__63ac7a3d01bf8632",
       "tiles": 1,
       "ref_keypoints": 1024,
-      "detect_ms": 230.1,
-      "match_ms": 26.1,
-      "total_ms": 256.2,
-      "total_p95_ms": 336.9
+      "detect_ms": 248.9,
+      "match_ms": 16.4,
+      "total_ms": 265.2,
+      "total_p95_ms": 331.4
     }
   ]
 }
