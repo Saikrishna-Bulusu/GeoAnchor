@@ -38,8 +38,17 @@ import sys
 import time
 from pathlib import Path
 
-import cv2
-import numpy as np
+try:
+    import cv2
+    import numpy as np
+except ImportError as exc:                       # noqa: E722
+    raise SystemExit(
+        f"{exc}\n\n"
+        "This needs the project virtualenv, which carries OpenCV:\n"
+        "    cd %s && source .venv/bin/activate\n"
+        "then re-run. (`python3` on its own is the system interpreter and does\n"
+        "not have cv2 -- this is the most common way to trip over these scripts.)"
+        % Path(__file__).resolve().parent.parent)
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
