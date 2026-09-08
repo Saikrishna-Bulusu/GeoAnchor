@@ -599,8 +599,21 @@ frame, Xavier at MAXN -- matches identical at every size:
        13   26624        224.7      153.3    -71.4
        25   51200        448.3      332.1   -116.1
 
-Two-matmul is faster at **every** geometry, including the 9-10 tile band where
-the synthetic sweep predicted it would lose by 36 ms. Synthetic descriptors
+**Re-taken pinned** (8 Sept, `sudo jetson_clocks`, min == max == 2265600,
+8 cores, MAXN, load 0.76, 55.0 -> 59.5 C over the run, 9 reps) -- the numbers
+above were unpinned and these supersede them:
+
+    tiles  ref kp   max(dim=0)   2nd GEMM    delta   speedup
+        1    2048         22.5       17.9     -4.6     1.26x
+        4    8192         86.4       46.0    -40.4     1.88x
+        9   18432        159.8      106.4    -53.4     1.50x
+       10   20480        213.9      119.7    -94.2     1.79x
+       13   26624        252.4      134.1   -118.3     1.88x
+       25   51200        414.3      276.3   -138.0     1.50x
+
+Same conclusion, cleaner: 1.26-1.88x at every geometry, matches identical
+everywhere. Two-matmul is faster at **every** geometry, including the 9-10 tile
+band where the synthetic sweep predicted it would lose by 36 ms. Synthetic descriptors
 have the right shape and dtype but not the real store's memory layout, and at
 these sizes that is what the reduction kernel is reacting to. **Trust the store
 measurement over the synthetic one** -- the sweep script is still the right
@@ -1214,13 +1227,71 @@ scatter and the session cannot be reassembled.
 
 ---
 
+## OVERHEAD_MS, measured at last: 45.7 ms
+
+8 Sept 2026. Logitech C270 on the Xavier's USB, `sudo jetson_clocks` pinned,
+1280x720 MJPG, n=200 through the real `UvcFeed` and `Preprocessor`:
+
+    capture_age_ms    med  37.20   p95  41.20    V4L2 buffer stamp -> read() returns
+    preprocess_ms     med   4.20   p95   5.05    rescale to GSD + JPEG encode
+    bus                     1.22         1.57    measured separately, 53 KiB payload
+    decode                  3.10         3.40    cv2.imdecode in the processing layer
+    ------------------------------------------
+    OVERHEAD_MS       med  45.7    p95  51.3
+
+**The 40 ms assumption was close, and slightly optimistic.** The number that
+mattered was 88 ms -- above it `xfeat_cpu` misses on the Pi 5, below it fits.
+51.3 ms p95 is comfortably below, so **that conclusion survives contact with a
+real camera**, which was not guaranteed.
+
+Capture dominates it: 37 of the 45 ms, and nothing in this repo can shorten
+that. Preprocess, transport and decode together are 8.5 ms.
+
+Three limits on the number, all of which make it a floor rather than a ceiling:
+
+- **`capture_age_ms` starts at the V4L2 buffer timestamp, not at exposure.**
+  On a UVC webcam that stamp is closer to "the host finished receiving the
+  frame" than to "the sensor started integrating". True sensor-to-matcher is
+  higher by the exposure and the USB transfer, which this cannot see.
+- **The MAVLink hop is not in it.** The flight-controller link was disabled for
+  this run (`OL-15`), so this is capture-to-matcher, which is the half the
+  matcher's budget is measured against. Add the hop separately for the fusion
+  timestamp.
+- **A C270 is not the flight camera.** This is the right order of magnitude for
+  a USB camera on this board, not the number for whatever ships.
+
+### What else the camera run showed
+
+The full three-layer stack ran on live video for 90 s: 1264 frames published,
+193 fixes attempted, **0 accepted -- which is correct**, and `configs/
+camera.yaml` says so in its header. The camera is looking at a room and the
+reference is a tile of Sydney.
+
+- **MJPG is not a preference, restated with this camera.** 1280x720 YUYV
+  negotiates 7.5 fps and delivers 3.7; MJPG negotiates 30 and delivers 11.9.
+  640x480 MJPG delivers 14.9. The config already says MJPG; this is the second
+  camera to confirm it.
+- **`fx_px` is the blocker, exactly as item 2 predicted.** With no intrinsics
+  the preprocessor cannot scale to the reference GSD (`DLE-13`, `DL-13 scale
+  None`), so the processing layer sees a 1280x720 frame at the wrong scale and
+  rejects every one on `PLE-08` (`scale 1.849 is more than 0.35 from 1.0`).
+  Nothing downstream of calibration can be tested on this rig until that is
+  done.
+- `PLE-09` reports 1240 ms over budget, which is not news: with no accepted fix
+  there is never a prior, so every frame searches 25/25 tiles with `xfeat_mnn`
+  against 51200 keypoints. That is the cold-search cost, not the deployed one.
+- The C270's MJPG stream emits `Corrupt JPEG data: N extraneous bytes before
+  marker` on most frames. Cosmetic -- every frame decodes and the shapes are
+  right -- but it is noisy in logs and is the camera, not the code.
+
+---
+
 ## Open, in order
 
-1. **Measure `OVERHEAD_MS`** on the real rig -- capture to first byte of the
-   frame the matcher sees. Everything else is downstream of it.
-2. **Calibrate the camera** and put the real `fx_px` in the config. Without it
-   frames cannot be scaled to the reference GSD and the matcher eats the full
-   scale gap. Do not take fx from a datasheet.
+1. **Calibrate the camera** and put the real `fx_px` in the config. Now the
+   top item: `OVERHEAD_MS` is measured, and calibration is what blocks every
+   remaining live-camera question. Do not take fx from a datasheet.
+2. ~~**Measure `OVERHEAD_MS`**~~ -- done, 45.7 ms median / 51.3 p95. See above.
 3. **Run the top_k sweep** for `xfeat_lg`: latency on the board, accuracy on
    env80 on the Legion. A Pareto front on real hardware is contribution-shaped.
 4. **Export a covariance estimator** to `processing_layer/covariance.py`'s
