@@ -1,0 +1,207 @@
+{
+  "frame": [
+    484,
+    646
+  ],
+  "reps": 15,
+  "conditions_before": {
+    "torch": "2.4.1",
+    "torch_threads": 8,
+    "machine": "aarch64",
+    "board": {
+      "kind": "jetson",
+      "model": "Jetson-AGX",
+      "cores": 8
+    },
+    "governor": "schedutil",
+    "min_khz": "2265600",
+    "max_khz": "2265600",
+    "cur_khz": "2265600",
+    "pinned": true,
+    "loadavg": 1.96,
+    "temp_c": 50.0,
+    "throttled": null,
+    "power_w": null
+  },
+  "conditions_after": {
+    "torch": "2.4.1",
+    "torch_threads": 8,
+    "machine": "aarch64",
+    "board": {
+      "kind": "jetson",
+      "model": "Jetson-AGX",
+      "cores": 8
+    },
+    "governor": "schedutil",
+    "min_khz": "2265600",
+    "max_khz": "2265600",
+    "cur_khz": "2265600",
+    "pinned": true,
+    "loadavg": 6.73,
+    "temp_c": 58.5,
+    "throttled": null,
+    "power_w": null
+  },
+  "rows": [
+    {
+      "method": "akaze",
+      "store": "satellite_map__akaze__93d153e7078fb28d",
+      "tiles": 1,
+      "ref_keypoints": 2048,
+      "detect_ms": 127.7,
+      "match_ms": 11.5,
+      "total_ms": 139.2,
+      "total_p95_ms": 155.7
+    },
+    {
+      "method": "edgepoint2_s32",
+      "store": "satellite_map__edgepoint2_s32__069f8d1f20c45cb2",
+      "tiles": 1,
+      "ref_keypoints": 2048,
+      "detect_ms": 188.6,
+      "match_ms": 21.0,
+      "total_ms": 209.6,
+      "total_p95_ms": 317.6
+    },
+    {
+      "method": "edgepoint2_s64",
+      "store": "satellite_map__edgepoint2_s64__568f260bd01c9aff",
+      "tiles": 1,
+      "ref_keypoints": 4096,
+      "detect_ms": 193.0,
+      "match_ms": 51.8,
+      "total_ms": 244.8,
+      "total_p95_ms": 293.3
+    },
+    {
+      "method": "edgepoint2_s64",
+      "store": "satellite_map__edgepoint2_s64__9ffc3419a7b87183",
+      "tiles": 1,
+      "ref_keypoints": 512,
+      "detect_ms": 187.4,
+      "match_ms": 8.7,
+      "total_ms": 196.1,
+      "total_p95_ms": 236.2
+    },
+    {
+      "method": "edgepoint2_s64",
+      "store": "satellite_map__edgepoint2_s64__aeb342a97572c941",
+      "tiles": 1,
+      "ref_keypoints": 1024,
+      "detect_ms": 193.2,
+      "match_ms": 15.2,
+      "total_ms": 208.4,
+      "total_p95_ms": 243.2
+    },
+    {
+      "method": "edgepoint2_s64",
+      "store": "satellite_map__edgepoint2_s64__e9fac76a66a95636",
+      "tiles": 1,
+      "ref_keypoints": 2048,
+      "detect_ms": 184.3,
+      "match_ms": 26.6,
+      "total_ms": 210.9,
+      "total_p95_ms": 253.9
+    },
+    {
+      "method": "edgepoint2_t32",
+      "store": "satellite_map__edgepoint2_t32__ade20297cdb54d77",
+      "tiles": 1,
+      "ref_keypoints": 2048,
+      "detect_ms": 168.8,
+      "match_ms": 19.5,
+      "total_ms": 188.3,
+      "total_p95_ms": 234.1
+    },
+    {
+      "method": "orb",
+      "store": "satellite_map__orb__f117c1bc75a30312",
+      "tiles": 1,
+      "ref_keypoints": 2048,
+      "detect_ms": 63.6,
+      "match_ms": 28.9,
+      "total_ms": 92.5,
+      "total_p95_ms": 103.6
+    },
+    {
+      "method": "sift",
+      "store": "satellite_map__sift__d6991dcfd17b50dd",
+      "tiles": 1,
+      "ref_keypoints": 2048,
+      "detect_ms": 79.3,
+      "match_ms": 41.6,
+      "total_ms": 120.9,
+      "total_p95_ms": 144.8
+    },
+    {
+      "method": "xfeat_lg",
+      "store": "satellite_map__xfeat_lg__2fec74c30cf8d803",
+      "tiles": 1,
+      "ref_keypoints": 512,
+      "detect_ms": 227.3,
+      "match_ms": 1172.8,
+      "total_ms": 1400.2,
+      "total_p95_ms": 1651.1
+    },
+    {
+      "method": "xfeat_lg",
+      "store": "satellite_map__xfeat_lg__daacdf17f7d68b19",
+      "tiles": 1,
+      "ref_keypoints": 1024,
+      "detect_ms": 224.7,
+      "match_ms": 1520.1,
+      "total_ms": 1744.8,
+      "total_p95_ms": 1931.2
+    },
+    {
+      "method": "xfeat_lg",
+      "store": "satellite_map__xfeat_lg__e98187521b1622a3",
+      "tiles": 1,
+      "ref_keypoints": 2048,
+      "detect_ms": 237.8,
+      "match_ms": 2143.0,
+      "total_ms": 2380.8,
+      "total_p95_ms": 2537.6
+    },
+    {
+      "method": "xfeat_mnn",
+      "store": "satellite_map__xfeat_mnn__02f7ac091dc857cb",
+      "tiles": 1,
+      "ref_keypoints": 2048,
+      "detect_ms": 237.5,
+      "match_ms": 28.9,
+      "total_ms": 266.4,
+      "total_p95_ms": 330.3
+    },
+    {
+      "method": "xfeat_mnn",
+      "store": "satellite_map__xfeat_mnn__1ece2dfa0111c4c8",
+      "tiles": 1,
+      "ref_keypoints": 4096,
+      "detect_ms": 221.3,
+      "match_ms": 51.4,
+      "total_ms": 272.7,
+      "total_p95_ms": 313.0
+    },
+    {
+      "method": "xfeat_mnn",
+      "store": "satellite_map__xfeat_mnn__2e3c4b30cdad01a8",
+      "tiles": 1,
+      "ref_keypoints": 512,
+      "detect_ms": 225.0,
+      "match_ms": 10.1,
+      "total_ms": 235.1,
+      "total_p95_ms": 268.6
+    },
+    {
+      "method": "xfeat_mnn",
+      "store": "satellite_map__xfeat_mnn__63ac7a3d01bf8632",
+      "tiles": 1,
+      "ref_keypoints": 1024,
+      "detect_ms": 220.0,
+      "match_ms": 15.4,
+      "total_ms": 235.4,
+      "total_p95_ms": 270.3
+    }
+  ]
+}

@@ -684,6 +684,50 @@ quoted anywhere.
 **A number without its clock is not a result.** That is why this is in the
 script now rather than in a commit message.
 
+### The first Xavier run with documented conditions, 8 Sept
+
+`results/bench_matchers_xavier_pinned.json`. `jetson_clocks` pinned
+(min == max == 2265600), MAXN, 8 cores, torch 2.4.1 / 8 threads, load 1.96 on
+8 cores, 50.0 -> 58.5 C, `--tiles 1 --reps 15`. Every earlier Xavier number in
+this file was taken either unpinned or under unrecorded load, so **this is the
+reference run from here on.**
+
+    matcher           Pi det  Pi mat  Pi tot |  Xav det  Xav mat  Xav tot | winner
+    orb                 33.5    34.4    67.9 |     63.6     28.9     92.5 | Pi 1.36x
+    sift               103.5    80.2   183.7 |     79.3     41.6    120.9 | Xav 1.52x
+    akaze               64.3    17.0    81.3 |    127.7     11.5    139.2 | Pi 1.71x
+    xfeat_mnn          253.9    55.7   309.7 |    237.5     28.9    266.4 | Xav 1.16x
+    edgepoint2_t32     199.1    39.8   238.9 |    168.8     19.5    188.3 | Xav 1.27x
+    edgepoint2_s32     215.7    34.5   250.3 |    188.6     21.0    209.6 | Xav 1.19x
+    edgepoint2_s64     237.6    42.8   280.4 |    184.3     26.6    210.9 | Xav 1.33x
+    xfeat_lg           312.2  3325.8  3638.0 |    237.8   2143.0   2380.8 | Xav 1.53x
+
+That reads as a reversal of this file's standing claim that "the Xavier is
+1.3-2.0x slower than a Pi 5 across every matcher" -- the Xavier wins six of
+eight here. **Do not record that as a finding yet, because the two runs are not
+comparable and the difference is in the direction that would produce exactly
+this result.**
+
+    board    pinned   loadavg / cores   torch threads
+    Pi 5     yes      2.90 / 4 = 0.73   4
+    Xavier   yes      1.96 / 8 = 0.245  8
+
+**The Pi was three-quarters busy and the Xavier a quarter.** A 3x difference in
+contention, on the axis that this file has already twice caught misreading as a
+code change, and it hits multi-threaded torch work hardest -- which is exactly
+where the Xavier's six wins are. The two rows the Pi still wins are OpenCV
+detectors, the least threaded work in the table.
+
+So what is established is narrower than it looks: **the Xavier now has one run
+whose conditions are known.** The cross-board comparison needs an idle Pi run
+before any of it goes in the baseline table, and until then the Pi 5 baseline
+under "Pi 5 baseline to compare against" stays provisional.
+
+Worth being explicit about a limit here too: **a Claude Code session runs on
+this board**, and is most of the 1.96. A truly idle Xavier measurement is not
+available from inside the session doing the measuring, which is a floor on how
+clean any number taken this way can be.
+
 ### The Pi's re-run: `performance` is not pinned, and a pinned clock is not enough
 
 The check found the same trap on the other board, in a different disguise. The
