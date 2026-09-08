@@ -130,6 +130,12 @@ Xavier's eight cores win the matmul against the Pi's four. See "The Pi 5 wins
 every matcher except EdgePoint2" in `CLAUDE.md`, including the `WIDE_REF`
 hypothesis and the one-command test for it, which is now the open question.
 
+Run `python scripts/wide_ref_sweep.py --json results/wide_ref_pi5.json` and
+commit the result. It prints this board's one-matmul / two-matmul curve across
+reference sizes and names the crossover. On the Xavier the curve turned out to
+be non-monotonic -- one-matmul wins only in a window near N=12000-20000 -- so
+report the whole table, not just the crossover number; the shape is the finding.
+
 **The original note, kept because the reasoning is what was wrong:** EdgePoint2 is the
 pipeline's current default (`configs/system.yaml`, gate 8, k=2048) and it has
 never run on a Pi. If the 1.4-2.0x per-core gap holds, its 203 ms detection

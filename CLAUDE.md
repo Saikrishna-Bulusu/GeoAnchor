@@ -508,29 +508,72 @@ A76's per-clock edge is mostly spent. Matching is a 2048x2048 matmul over 64-D
 descriptors, which threads well, and there the Xavier's eight cores finally pay
 for themselves against the Pi's four.
 
-Two things make this worth chasing rather than accepting:
+**On the same board, edgepoint2's match costs 3x xfeat_mnn's** (89.1 against
+30.6). Both emit exactly 2048 frame keypoints with 64-D descriptors on this
+frame -- checked, not assumed -- so the problem size is identical and the only
+difference is which form of the mutual-NN reduction they take. XFeat's matcher
+always pays for a second GEMM (`xfeat/modules/xfeat.py:328`);
+`EdgePoint2Method.match` takes `cossim.max(dim=0)` below `WIDE_REF`. That is
+the entire delta.
 
-- **On the same board, edgepoint2's match costs 3x xfeat_mnn's** (89.1 against
-  30.6) for the same descriptor width and the same keypoint counts. On the
-  Xavier it is the other way round (20.7 against 28.6). Same linear algebra,
-  opposite ranking: that is an implementation difference, not a board one.
-- The leading suspect is **`WIDE_REF`**. `EdgePoint2Method.match` picks its
-  reduction axis by reference size and below 20000 takes `cossim.max(dim=0)`,
-  a reduction over the strided axis of a 2048x2048 tensor. 20000 was fitted to
-  the Xavier's cache and the handoff already flagged it as the one constant
-  that would not transfer. If the Pi's crossover is below 2048, it is currently
-  taking the wrong branch on every frame.
+### WIDE_REF is the wrong SHAPE of model, not just the wrong number
 
-**Test it on the Pi before concluding anything about the board:** force the
-two-matmul branch (`WIDE_REF = 0`) and re-run `bench_matchers.py --tiles 1`.
-If match drops toward 30 ms the constant is the bug and edgepoint2 is fine
-there; if it does not, the four-core matmul gap is real and edgepoint2 belongs
-on the Xavier.
+Swept on the Xavier, 8 Sept 2026 (`scripts/wide_ref_sweep.py`,
+`results/wide_ref_xavier*.json`), synthetic L2-normalised descriptors, Q=2048,
+dim 64, median of 7:
 
-This matters more at deployed geometry than the table shows. Match is linear in
-reference keypoints, so a 4.3x match penalty at 1 tile becomes the dominant
-term at the 9-13 tiles the prior actually selects -- extrapolating, ~800 ms
-against the Xavier's measured 171 ms.
+    N (ref kp)   one-matmul   two-matmul   winner
+          1024        17.17        16.55   two
+          2048        23.76        20.30   two
+          4096        49.95        27.88   two
+          8192        87.99        56.80   two
+         12000        50.12        68.33   one
+         16000        71.50        87.37   one
+         20000        74.14       107.46   one
+         25600       209.17       140.34   two
+         32768       357.36       168.51   two
+         51200       427.20       272.03   two
+
+**one-matmul wins only inside a window**, roughly N=12000-20000, and loses on
+both sides of it. A single threshold cannot express that, so no value of
+`WIDE_REF` is correct. The window sits in the same place at Q=1024 and Q=4096,
+and both forms return identical matches (checked at N=4096).
+
+The component breakdown says the window is not a cache curve -- it is torch
+picking different reduction kernels by shape:
+
+    N        gemm   max(dim=1)   max(dim=0)   2nd gemm
+    8192    23.77         1.96        66.04      24.64
+    12000   31.87         4.19        15.03      30.85
+    16000   39.28         3.20        24.05      38.71
+    20000   47.83         3.83        23.67      50.63
+    25600   69.83         8.56       162.95      66.86
+
+GEMM is smooth and linear. `max(dim=1)` is cheap and smooth. **`max(dim=0)` is
+the whole story and it swings 15 -> 163 ms, faster on 94 MB than on 64 MB.**
+Reproduced ascending and descending, so it is not measurement order. Chunking
+the reduction (1k and 4k columns) is worse at every size, and `argmax` instead
+of `max` is not reliably better -- both were tried.
+
+So the practical choice is between an erratic path and a predictable one:
+
+- **one-matmul** is 1.45x better inside the window and up to 1.5x worse
+  outside it, with a 2x cliff between N=20000 and N=25600.
+- **two-matmul** is monotonic in N at every Q measured. Never catastrophic.
+
+The pipeline sits exactly on the cliff. At 10 tiles (20480 refs, the observed
+median) one-matmul costs ~76 ms against two-matmul's ~112; at 13 tiles (26624)
+it costs ~214 against ~148. **The prior's tile count decides which side of a 2x
+discontinuity each frame lands on**, which is the worst possible property for a
+latency budget, and it is invisible in a median.
+
+**Recommendation, not yet applied: drop `WIDE_REF` and always take the
+two-matmul form, as XFeat does.** It costs about 36 ms at the current operating
+point on the Xavier and buys back predictability, removes the 66 ms penalty at
+13 tiles, and should remove the Pi's 3x small-N penalty outright. Confirm on
+the Pi first -- its torch version dispatches its own kernels and the window may
+sit somewhere else entirely. `python scripts/wide_ref_sweep.py --json
+results/wide_ref_pi5.json` prints that board's curve in one command.
 
 ### On ARM, XFeat is slower than SIFT -- on both boards
 
