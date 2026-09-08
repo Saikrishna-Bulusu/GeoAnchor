@@ -148,6 +148,14 @@ def main() -> int:
     ap.add_argument("--views", type=int, default=20)
     ap.add_argument("--min-shift", type=float, default=40.0,
                     help="mean corner movement, px, before a view counts as new")
+    ap.add_argument("--min-sharpness", type=float, default=60.0,
+                    help="variance of the Laplacian below which a frame is too "
+                         "blurred to localise corners in")
+    ap.add_argument("--max-motion", type=float, default=2.0,
+                    help="mean corner movement, px, between two consecutive "
+                         "detections for the board to count as held still")
+    ap.add_argument("--max-rms", type=float, default=1.0,
+                    help="target rms; worst views are dropped until this is met")
     ap.add_argument("--min-tilt", type=float, default=0.06,
                     help="log ratio of opposite edge lengths counting as a tilted "
                          "view. This is a PERSPECTIVE SIGNAL threshold, not an "
@@ -184,6 +192,7 @@ def main() -> int:
     banked_img: list = []
     banked_obj: list = []
     tilts: list = []
+    prev_corners = None
     objp = object_points(nx, ny)
     frames = []
     t0 = time.time()
@@ -207,6 +216,36 @@ def main() -> int:
             continue
         seen += 1
         corners = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), TERM)
+
+        # BLUR. The board is found in a blurred frame just fine; cornerSubPix
+        # then localises smeared corners confidently and wrongly, and the view
+        # lands in the set looking like every other one. Two such views out of
+        # 22 took a run from 0.7 px to 2.79 px rms on 8 Sept, because rms is
+        # over POINTS and a couple of bad views dominate it.
+        sharp = cv2.Laplacian(gray, cv2.CV_64F).var()
+        if sharp < a.min_sharpness:
+            if time.time() - last_note > 4.0:
+                print(f"  [{time.time()-t0:5.0f}s] too blurred to trust "
+                      f"(sharpness {sharp:.0f} < {a.min_sharpness:.0f}) -- hold still")
+                last_note = time.time()
+            prev_corners = corners
+            continue
+
+        # STATIONARY. Same problem from the other side: auto-capture while the
+        # camera is still moving is what produces the blur in the first place.
+        # Requiring two consecutive detections in nearly the same place is a
+        # cheaper and more direct test than any blur metric.
+        if prev_corners is not None:
+            moved = np.linalg.norm(corners.reshape(-1, 2) -
+                                   prev_corners.reshape(-1, 2), axis=1).mean()
+            if moved > a.max_motion:
+                prev_corners = corners
+                continue
+        else:
+            prev_corners = corners
+            continue
+        prev_corners = corners
+
         tx, ty = foreshortening(corners, nx, ny)
         # Once the count is met, only views that fill a MISSING tilt direction
         # are still worth taking -- otherwise the tail of the session is twenty
@@ -297,7 +336,13 @@ def main() -> int:
     out = {"usable": not bad, "rejected_because": bad,
            "tilt_coverage": cov, "tilts": [[round(x, 3), round(y, 3)] for x, y in tilts],
            "device": a.device, "width": got_w, "height": got_h,
-           "fourcc": a.fourcc, "pattern": [nx, ny], "views": len(banked_img),
+           "fourcc": a.fourcc, "pattern": [nx, ny],
+           "views": len(kept), "views_captured": len(kept) + len(dropped),
+           "dropped": dropped,
+           # The corners themselves, so a failed run can be re-fitted offline
+           # instead of re-shot. The first two failures both had to be re-shot
+           # only because this was not saved.
+           "corners": [c.reshape(-1, 2).round(3).tolist() for c in banked_img],
            "rms_px": round(float(rms), 4),
            "per_view_err_px": [round(e, 4) for e in errs],
            "fx_px": round(float(fx), 2), "fy_px": round(float(fy), 2),

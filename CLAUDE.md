@@ -1433,6 +1433,44 @@ just the backstop.
 `results/camera_intrinsics_FAILED_degenerate.json` is kept as the worked
 example.
 
+### The second failure was the opposite problem, and needed the opposite fix
+
+With tilt coverage enforced, the next run came back **well conditioned and
+still rejected**: `fx = 1451.75`, `fy = 1474.27` -- 1.6% apart, `fx/width`
+1.13, an implied 47.8 degree field of view, which is right for a C270 in 16:9.
+Coverage was met in all four directions. The only failing check was
+`rms = 2.795`.
+
+The per-view errors say why, and it is not a conditioning problem at all:
+
+    8.931  7.633  2.624  2.237  1.978  1.753  1.648  1.568  1.296  1.183  1.076
+    0.964  0.885  0.841  0.786  0.757  0.715  0.664  0.627  0.515  0.409  0.368
+
+Twenty views under 2.7 px and two at 8.9 and 7.6. **rms is over POINTS, so a
+couple of ruined views dominate it** -- the 8.9 px view alone outweighs the
+twelve best combined. The two usual causes are motion blur (the board is found
+in a blurred frame perfectly well, and `cornerSubPix` then localises smeared
+corners confidently and wrongly) and the chessboard's 180-degree ordering
+ambiguity, which pairs corners with the wrong object points and is invisible
+in any single view.
+
+Both are fixed the same way, and the script now does three things about it:
+
+- **Drops the worst view and refits, repeatedly,** until rms meets the target
+  or the set falls to `max(8, views/2)`. It stops there rather than dropping
+  until the target is met at any cost, because a calibration fitted to six
+  hand-picked views is a calibration fitted to its own residuals. Validated on
+  a synthetic set of 22 views with two deliberately spoiled: rms 3.646 ->
+  0.000 and fx 1144.09 -> 1150.00 against a truth of exactly 1150, dropping
+  precisely the two bad ones.
+- **Refuses blurred frames at capture** (variance of the Laplacian) and
+  **requires the board to be held still** -- two consecutive detections within
+  2 px. The stationarity test is the more direct of the two, since auto-capture
+  while the camera is still moving is what produces the blur.
+- **Saves the corners into the JSON**, so a failed run can be refitted offline
+  instead of re-shot. Both earlier failures had to be re-shot only because this
+  was not saved.
+
 ---
 
 ## Open, in order
