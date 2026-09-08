@@ -1,0 +1,46 @@
+{
+  "usable": true,
+  "recovered_from": "stdout of the 8 Sept run that crashed on NameError before writing (fixed in this commit). Corners are NOT available, so this cannot be refitted offline; re-shoot if that is ever needed.",
+  "device": 0,
+  "width": 1280,
+  "height": 720,
+  "fourcc": "MJPG",
+  "pattern": [
+    9,
+    6
+  ],
+  "views": 20,
+  "views_captured": 20,
+  "dropped": [],
+  "detections": 704,
+  "frames_turned_away": {
+    "blurred": 253,
+    "moving": 175,
+    "too similar": 255
+  },
+  "tilt_coverage": {
+    "up": ">=2",
+    "down": ">=2",
+    "left": ">=2",
+    "right": ">=2"
+  },
+  "rms_px": 0.2568,
+  "per_view_err_px_summary": {
+    "min": 0.148,
+    "median": 0.206,
+    "max": 0.544
+  },
+  "fx_px": 1421.48,
+  "fy_px": 1421.03,
+  "cx_px": 630.01,
+  "cy_px": 345.72,
+  "dist": [
+    0.00875,
+    0.80241,
+    0.00051,
+    0.00097,
+    -2.79954
+  ],
+  "note": "square size assumed 1.0; fx in pixels is invariant to it",
+  "gsd_cm_px_at_75m": 5.28
+}

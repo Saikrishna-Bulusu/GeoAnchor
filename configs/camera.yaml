@@ -64,19 +64,25 @@ data_layer:
     frame_px: 512
     jpeg_quality: 80
     intrinsics:
-      # DELIBERATELY EMPTY. Without fx_px the preprocessor cannot scale the
-      # frame to the reference GSD, so it falls back to a fixed long edge and
-      # says so on every frame (DLE-13). That is the honest state until
-      # `python scripts/calibrate_camera.py` has been run against THIS camera
-      # -- CLAUDE.md open item 2, and explicitly not a number to take from a
-      # datasheet. Putting a plausible-looking fx here would make the warning
-      # go away without making the scale right.
-      fx_px: null
-      fy_px: null
-      cx_px: null
-      cy_px: null
-      dist: null
-
+      # MEASURED, 8 Sept 2026, on the Logitech C270 at 1280x720 MJPG.
+      # 20 views of a chessboard displayed on a screen, tilt coverage in all
+      # four directions, rms reprojection error 0.2568 px (per-view 0.148 to
+      # 0.544). results/camera_intrinsics.json has the full record.
+      #
+      # THESE BELONG TO 1280x720 ON THAT CAMERA. fx scales with image width, so
+      # a different capture size or a different camera needs a new run --
+      # `python scripts/calibrate_camera.py --apply configs/camera.yaml`, which
+      # refuses to write into a config whose capture size disagrees.
+      #
+      # GSD = altitude / fx_px, so 75 m AGL gives 5.28 cm/px against the sydney
+      # reference tile's 12.38 cm/px: frames are downscaled about 2.34x to
+      # match. Before this was measured the preprocessor could not scale at all
+      # and every frame died on PLE-08 at scale 1.849.
+      fx_px: 1421.48
+      fy_px: 1421.03
+      cx_px: 630.01
+      cy_px: 345.72
+      dist: [0.00875, 0.80241, 0.00051, 0.00097, -2.79954]
   gps:
     # There is no autopilot on the bench and no truth for a camera on a desk.
     # `none` means fixes are logged and shown but never scored, which is the

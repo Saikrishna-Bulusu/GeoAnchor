@@ -1433,6 +1433,27 @@ just the backstop.
 `results/camera_intrinsics_FAILED_degenerate.json` is kept as the worked
 example.
 
+### It passed on the fourth attempt: fx = 1421.48
+
+C270 at 1280x720 MJPG, chessboard on a screen, 704 detections, 20 views banked:
+
+    rms reprojection error   0.2568 px    (per-view 0.148 / 0.206 / 0.544)
+    fx_px  1421.48    fy_px  1421.03      0.03% apart
+    cx_px   630.01    cy_px   345.72      against a centre of 640.0, 360.0
+    dist   [0.00875, 0.80241, 0.00051, 0.00097, -2.79954]
+    tilt coverage: up, down, left, right all satisfied
+
+`fx/width` is 1.11, a 47.8 degree horizontal field of view, which is right for
+a C270 in 16:9. GSD at 75 m AGL is 5.28 cm/px against the reference tile's
+12.38, so frames downscale about 2.34x.
+
+**The scale path still cannot run on the bench, and that is correct.** GSD =
+altitude / fx_px, and `camera.yaml` has `gps: source: none`, so with no
+altitude the preprocessor falls back to a fixed long edge (`DLE-13`) and every
+frame is rejected on `PLE-08`. Verified that the intrinsics themselves are
+live: the preprocessor reports `fx_px = 1421.48` and, given 75 m, returns
+scale 0.426 with no warning. Altitude is now the open input, not calibration.
+
 ### The second failure was the opposite problem, and needed the opposite fix
 
 With tilt coverage enforced, the next run came back **well conditioned and
@@ -1475,11 +1496,16 @@ Both are fixed the same way, and the script now does three things about it:
 
 ## Open, in order
 
-1. **Calibrate the camera** and put the real `fx_px` in the config. Now the
-   top item: `OVERHEAD_MS` is measured, and calibration is what blocks every
-   remaining live-camera question. Do not take fx from a datasheet.
-   Tooling is written and needs only a screen -- see below.
+1. **Get an altitude source onto the live-camera rig.** With intrinsics
+   measured, this is the only remaining input the scale path lacks: GSD =
+   altitude / fx_px, and `configs/camera.yaml` runs `gps: source: none`, so
+   the preprocessor still falls back to a fixed long edge (`DLE-13`) and every
+   frame is rejected on `PLE-08`. On a bench that is correct behaviour, not a
+   fault. A static test altitude, or a rangefinder, or the FC's own AGL.
 2. ~~**Measure `OVERHEAD_MS`**~~ -- done, 45.7 ms median / 51.3 p95. See above.
+3. ~~**Calibrate the camera**~~ -- done 8 Sept, C270 at 1280x720:
+   `fx_px 1421.48`, `fy_px 1421.03`, `cx 630.01`, `cy 345.72`, rms 0.2568 px
+   over 20 views. In `configs/camera.yaml` and `results/camera_intrinsics.json`.
 3. **Run the top_k sweep** for `xfeat_lg`: latency on the board, accuracy on
    env80 on the Legion. A Pareto front on real hardware is contribution-shaped.
 4. **Export a covariance estimator** to `processing_layer/covariance.py`'s

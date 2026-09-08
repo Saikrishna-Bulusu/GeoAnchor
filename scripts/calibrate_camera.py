@@ -346,20 +346,44 @@ def main() -> int:
         return 1
 
     print(f"\ncalibrating on {len(banked_img)} views...")
-    rms, K, dist, rvecs, tvecs = cv2.calibrateCamera(
-        banked_obj, banked_img, (got_w, got_h), None, None)
 
-    # Per-view reprojection error, because a single bad view drags the mean and
-    # is worth being able to see and drop.
-    errs = []
-    for i in range(len(banked_obj)):
-        proj, _ = cv2.projectPoints(banked_obj[i], rvecs[i], tvecs[i], K, dist)
-        # norm/sqrt(N), not norm/N. NORM_L2 is already sqrt(sum of squares), so
-        # dividing by N understates the per-view RMS by sqrt(N) -- a factor of
-        # 7.35 on a 9x6 board, which is enough to make 0.9 px views look like
-        # 0.12 px ones and hide a degenerate solve completely.
-        errs.append(float(cv2.norm(banked_img[i], proj, cv2.NORM_L2) /
-                          np.sqrt(len(proj))))
+    def fit(imgs, objs):
+        rms, K, dist, rvecs, tvecs = cv2.calibrateCamera(
+            objs, imgs, (got_w, got_h), None, None)
+        errs = []
+        for i in range(len(objs)):
+            proj, _ = cv2.projectPoints(objs[i], rvecs[i], tvecs[i], K, dist)
+            # norm/sqrt(N), not norm/N. NORM_L2 is already sqrt(sum of
+            # squares), so dividing by N understates the per-view RMS by
+            # sqrt(N) -- 7.35x on a 9x6 board, enough to hide a bad fit.
+            errs.append(float(cv2.norm(imgs[i], proj, cv2.NORM_L2) /
+                              np.sqrt(len(proj))))
+        return rms, K, dist, errs
+
+    # DROP THE WORST VIEWS AND REFIT. rms is over POINTS, so two ruined views
+    # out of 22 dominate it -- one run had twenty views under 2.7 px and two at
+    # 8.9 and 7.6, where the 8.9 alone outweighed the twelve best combined. The
+    # usual causes are motion blur and the chessboard's 180-degree ordering
+    # ambiguity, which pairs corners with the wrong object points and is
+    # invisible in any single view. Both are fixed by refitting without them.
+    #
+    # Stops at min_views rather than dropping until the target is met at any
+    # cost: a calibration fitted to six hand-picked views is a calibration
+    # fitted to its own residuals.
+    min_views = max(8, a.views // 2)
+    kept = list(range(len(banked_img)))
+    rms, K, dist, errs = fit(banked_img, banked_obj)
+    dropped = []
+    while rms > a.max_rms and len(kept) > min_views:
+        worst = int(np.argmax(errs))
+        dropped.append([kept.pop(worst), round(errs[worst], 3)])
+        banked_img = [c for i, c in enumerate(banked_img) if i != worst]
+        banked_obj = [o for i, o in enumerate(banked_obj) if i != worst]
+        rms, K, dist, errs = fit(banked_img, banked_obj)
+    if dropped:
+        print(f"  dropped {len(dropped)} view(s) at "
+              f"{', '.join(f'{e:.2f}' for _, e in dropped)} px; "
+              f"refitted on {len(kept)}, rms {rms:.4f}")
 
     fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
     print(f"\n  rms reprojection error  {rms:.4f} px   (under ~0.5 is good, "
