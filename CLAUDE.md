@@ -684,6 +684,34 @@ quoted anywhere.
 **A number without its clock is not a result.** That is why this is in the
 script now rather than in a commit message.
 
+### The Pi 5's own pinning trap: `performance` governor is not pinned
+
+Found the same day, on this board, by the same check. `scaling_governor` was
+already `performance` -- the state `bootstrap.sh`-adjacent instructions leave
+it in -- and `bench_matchers.py` still printed `NOT PINNED`, because the
+governor and the frequency range are two different knobs. `performance` only
+means the governor requests the top of whatever range `scaling_min_freq` /
+`scaling_max_freq` allow; this board's range was still `1500000-2400000`, so
+`cur_freq` sat at 2400000 under load but was free to step down the instant
+load dropped, and a benchmark that idles between reps (model load, store
+open) can retime mid-run without ever showing up as a governor change.
+
+Fix is the range, not the governor:
+
+    echo 2400000 | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_min_freq
+
+`scaling_min_freq == scaling_max_freq` is what the script's `pinned` check
+actually tests, and it is the correct test -- checking the governor string
+alone would have kept passing throughout this trap. Confirmed pinned, re-ran,
+same result held (`edgepoint2_s64` 280.4 ms against `xfeat_mnn`'s 309.7 ms at
+2048 ref keypoints): the reversal fix does not depend on this bug, but the
+absolute numbers in `results/bench_matchers_pi5_postfix.json` do, and the file
+now carries `conditions_before`/`conditions_after` showing `pinned: true`.
+
+**This does not survive a reboot**, same as `jetson_clocks` on the Xavier --
+`scaling_min_freq` resets to the hardware default range on boot, so re-pin
+before trusting any timing run on this board, not just once per session.
+
 ### On ARM, XFeat is slower than SIFT -- on both boards
 
 XFeat's own README claims it is "faster than SIFT on CPU", and the paper's CPU
