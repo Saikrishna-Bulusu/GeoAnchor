@@ -1,0 +1,53 @@
+{
+  "usable": false,
+  "rejected_because": [
+    "fx/width = 36.96, outside the 0.3-4.0 any real lens gives (that is a 1.55 deg horizontal field of view)",
+    "fx and fy differ by 23.0%, over 5% -- real sensors have near-square pixels",
+    "rms reprojection error 1.410 px, over 1.0"
+  ],
+  "kept_as": "evidence of the degenerate-solve failure mode; see CLAUDE.md",
+  "device": 0,
+  "width": 1280,
+  "height": 720,
+  "fourcc": "MJPG",
+  "pattern": [
+    9,
+    6
+  ],
+  "views": 20,
+  "rms_px": 1.4097,
+  "per_view_err_px": [
+    0.1736,
+    0.1107,
+    0.1159,
+    0.0909,
+    0.0629,
+    0.0308,
+    0.0552,
+    0.099,
+    0.1036,
+    0.0601,
+    0.2523,
+    0.2246,
+    0.3613,
+    0.1273,
+    0.3242,
+    0.2816,
+    0.0909,
+    0.2639,
+    0.2758,
+    0.2016
+  ],
+  "fx_px": 47308.3,
+  "fy_px": 36420.61,
+  "cx_px": 639.51,
+  "cy_px": 359.49,
+  "dist": [
+    5.233773,
+    55798.145762,
+    0.00721,
+    -0.005413,
+    299337272.168617
+  ],
+  "note": "square size assumed 1.0; fx in pixels is invariant to it"
+}

@@ -58,6 +58,10 @@ FLAGS = (cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE |
 TERM = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
 
 
+def _cov(cov: dict, need: int) -> str:
+    return " ".join(f"{k}{'ok' if v >= need else f'{v}/{need}'}" for k, v in cov.items())
+
+
 def object_points(nx: int, ny: int) -> np.ndarray:
     """Unit squares. See the module docstring: the scale cancels out of fx."""
     p = np.zeros((nx * ny, 3), np.float32)
@@ -65,17 +69,72 @@ def object_points(nx: int, ny: int) -> np.ndarray:
     return p
 
 
-def novelty(corners: np.ndarray, banked: list, min_shift: float) -> bool:
-    """Is this view different enough from every banked one to be worth keeping?
+def foreshortening(corners: np.ndarray, nx: int, ny: int) -> tuple:
+    """Signed tilt of the board about each axis, from edge foreshortening alone.
 
-    Compared on the corner set itself rather than on a solved pose: a pose needs
-    intrinsics, which is what we do not have yet.
+    THIS IS THE WHOLE BALLGAME AND THE FIRST VERSION GOT IT WRONG. A planar
+    target cannot separate focal length from distance in a frontal view: make
+    the board twice as far and the lens twice as long and the image is
+    identical. Only PERSPECTIVE breaks the tie -- the near edge subtending more
+    pixels than the far one. Bank twenty views by sliding the camera sideways
+    and every one of them is the same degenerate observation; the solver then
+    runs the focal length off to infinity with compensating distortion, which
+    is exactly what happened here on 8 Sept: fx = 47308 on a 1280 px frame, an
+    implied 1.55 degree field of view, and radial terms of 3e8.
+
+    Measuring it needs no intrinsics: in a frontal view opposite edges of the
+    board are the same length in the image, and tilt makes them differ. The log
+    ratio is signed, so it also says WHICH WAY the board is tilted, which is
+    what lets the caller ask for coverage in all four directions rather than
+    twenty views leaning the same way.
     """
+    g = corners.reshape(ny, nx, 2)
+    top = np.linalg.norm(g[0, -1] - g[0, 0])
+    bottom = np.linalg.norm(g[-1, -1] - g[-1, 0])
+    left = np.linalg.norm(g[-1, 0] - g[0, 0])
+    right = np.linalg.norm(g[-1, -1] - g[0, -1])
+    return (float(np.log(top / bottom)), float(np.log(left / right)))
+
+
+def novelty(corners: np.ndarray, banked: list, min_shift: float) -> bool:
+    """Different enough from every banked view to be worth keeping?"""
     c = corners.reshape(-1, 2)
     for b in banked:
         if np.linalg.norm(c - b.reshape(-1, 2), axis=1).mean() < min_shift:
             return False
     return True
+
+
+def tilt_coverage(tilts: list, thresh: float) -> dict:
+    """Which of the four tilt directions the banked set actually contains."""
+    # tx is log(top edge / bottom edge), so it reports tilt about the
+    # HORIZONTAL axis -- up and down. ty is log(left / right) and reports tilt
+    # about the vertical axis. Getting these the wrong way round only mislabels
+    # the prompt, but the prompt is the whole point of measuring it.
+    return {"up":    sum(1 for x, _ in tilts if x >= thresh),
+            "down":  sum(1 for x, _ in tilts if x <= -thresh),
+            "left":  sum(1 for _, y in tilts if y >= thresh),
+            "right": sum(1 for _, y in tilts if y <= -thresh)}
+
+
+def sanity(fx: float, fy: float, width: int, rms: float) -> list:
+    """Reasons this calibration must not be written into a config.
+
+    A degenerate solve does not announce itself -- it returns a clean-looking
+    matrix and an rms that can even be small. These are the three tells.
+    """
+    bad = []
+    if not (0.3 <= fx / width <= 4.0):
+        import math
+        fov = 2 * math.degrees(math.atan(width / (2 * fx)))
+        bad.append(f"fx/width = {fx/width:.2f}, outside the 0.3-4.0 any real lens "
+                   f"gives (that is a {fov:.2f} deg horizontal field of view)")
+    if abs(fx - fy) / fx > 0.05:
+        bad.append(f"fx and fy differ by {abs(fx-fy)/fx*100:.1f}%, over 5% -- real "
+                   f"sensors have near-square pixels")
+    if rms > 1.0:
+        bad.append(f"rms reprojection error {rms:.3f} px, over 1.0")
+    return bad
 
 
 def main() -> int:
@@ -89,6 +148,14 @@ def main() -> int:
     ap.add_argument("--views", type=int, default=20)
     ap.add_argument("--min-shift", type=float, default=40.0,
                     help="mean corner movement, px, before a view counts as new")
+    ap.add_argument("--min-tilt", type=float, default=0.06,
+                    help="log ratio of opposite edge lengths counting as a tilted "
+                         "view. This is a PERSPECTIVE SIGNAL threshold, not an "
+                         "angle: 0.06 means one edge is ~6%% longer than the one "
+                         "opposite it, which a board filling the frame reaches at "
+                         "about 15-20 deg and a small distant board needs more tilt "
+                         "to reach. Signal is what the solver needs, so thresholding "
+                         "it rather than the angle is the right way round.")
     ap.add_argument("--timeout", type=float, default=300.0)
     ap.add_argument("--save-frames", default="", help="directory to keep the captures in")
     ap.add_argument("--json", default=str(REPO / "results" / "camera_intrinsics.json"))
@@ -116,32 +183,64 @@ def main() -> int:
 
     banked_img: list = []
     banked_obj: list = []
+    tilts: list = []
     objp = object_points(nx, ny)
     frames = []
     t0 = time.time()
     last_note = 0.0
     seen = 0
-    while len(banked_img) < a.views and time.time() - t0 < a.timeout:
+    need = max(2, a.views // 8)          # per direction
+    while (len(banked_img) < a.views or
+           min(tilt_coverage(tilts, a.min_tilt).values()) < need) and \
+            time.time() - t0 < a.timeout:
         ok, frame = cap.read()
         if not ok:
             continue
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         found, corners = cv2.findChessboardCorners(gray, (nx, ny), FLAGS)
+        cov = tilt_coverage(tilts, a.min_tilt)
         if not found:
             if time.time() - last_note > 5.0:
                 print(f"  [{time.time()-t0:5.0f}s] no board in view "
-                      f"({len(banked_img)}/{a.views} banked)")
+                      f"({len(banked_img)}/{a.views} banked, {_cov(cov, need)})")
                 last_note = time.time()
             continue
         seen += 1
         corners = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), TERM)
+        tx, ty = foreshortening(corners, nx, ny)
+        # Once the count is met, only views that fill a MISSING tilt direction
+        # are still worth taking -- otherwise the tail of the session is twenty
+        # more of whatever is easiest to hold, which is what produced the
+        # degenerate solve.
+        enough = len(banked_img) >= a.views
+        fills = ((tx >= a.min_tilt and cov["up"] < need) or
+                 (tx <= -a.min_tilt and cov["down"] < need) or
+                 (ty >= a.min_tilt and cov["left"] < need) or
+                 (ty <= -a.min_tilt and cov["right"] < need))
+        if enough and not fills:
+            if time.time() - last_note > 4.0:
+                print(f"  [{time.time()-t0:5.0f}s] {len(banked_img)} views, but "
+                      f"{_cov(cov, need)} -- TILT the camera that way")
+                last_note = time.time()
+            continue
         if not novelty(corners, banked_img, a.min_shift):
             continue
         banked_img.append(corners)
         banked_obj.append(objp)
+        tilts.append((tx, ty))
         frames.append(frame.copy())
-        print(f"  [{time.time()-t0:5.0f}s] captured view {len(banked_img)}/{a.views}")
+        lean = ("frontal" if max(abs(tx), abs(ty)) < a.min_tilt
+                else f"tilt {tx:+.2f},{ty:+.2f}")
+        print(f"  [{time.time()-t0:5.0f}s] view {len(banked_img)}/{a.views}  "
+              f"{lean}  {_cov(tilt_coverage(tilts, a.min_tilt), need)}")
     cap.release()
+
+    cov = tilt_coverage(tilts, a.min_tilt)
+    print(f"\ntilt coverage: {_cov(cov, need)}   (need {need} each)")
+    if tilts and min(cov.values()) < need:
+        print("  WARNING: the views lean mostly one way. A planar board cannot")
+        print("           separate focal length from distance without perspective,")
+        print("           so this may still solve to a nonsense focal length.")
 
     if len(banked_img) < 6:
         print(f"\nonly {len(banked_img)} views ({seen} detections). "
@@ -160,7 +259,12 @@ def main() -> int:
     errs = []
     for i in range(len(banked_obj)):
         proj, _ = cv2.projectPoints(banked_obj[i], rvecs[i], tvecs[i], K, dist)
-        errs.append(float(cv2.norm(banked_img[i], proj, cv2.NORM_L2) / len(proj)))
+        # norm/sqrt(N), not norm/N. NORM_L2 is already sqrt(sum of squares), so
+        # dividing by N understates the per-view RMS by sqrt(N) -- a factor of
+        # 7.35 on a 9x6 board, which is enough to make 0.9 px views look like
+        # 0.12 px ones and hide a degenerate solve completely.
+        errs.append(float(cv2.norm(banked_img[i], proj, cv2.NORM_L2) /
+                          np.sqrt(len(proj))))
 
     fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
     print(f"\n  rms reprojection error  {rms:.4f} px   (under ~0.5 is good, "
@@ -171,13 +275,28 @@ def main() -> int:
     print(f"  cx_px  {cx:9.2f}      cy_px  {cy:9.2f}   (centre would be "
           f"{got_w/2:.1f}, {got_h/2:.1f})")
     print(f"  dist   {np.array2string(dist.ravel(), precision=5, suppress_small=True)}")
-    if abs(fx - fy) / fx > 0.05:
-        print("  WARNING: fx and fy differ by more than 5%. Real sensors are close to")
-        print("           square; this usually means too few oblique views.")
-    print(f"\n  GSD at 75 m AGL: {75.0/fx*100:.2f} cm/px   "
-          f"(the pipeline uses GSD = altitude / fx_px)")
+    bad = sanity(float(fx), float(fy), got_w, float(rms))
+    if bad:
+        print("\n  THIS CALIBRATION IS NOT USABLE:")
+        for why in bad:
+            print(f"    - {why}")
+        print("\n  Almost always this is too little PERSPECTIVE. A flat board seen")
+        print("  head-on cannot separate focal length from distance -- twice as far")
+        print("  with twice the focal length looks identical -- so the solver runs")
+        print("  fx off to infinity and hides the error in the distortion terms.")
+        print("  Sliding the camera sideways does not help; only TILTING does.")
+        print(f"  Tilt coverage this run: {_cov(cov, need)}")
+        print("\n  Redo it: hold the board at 30-45 degrees to the camera and take")
+        print("  views leaning left, right, up AND down, plus a few square-on. Vary")
+        print("  the distance. The script now refuses to stop until all four")
+        print("  directions are covered.")
+    else:
+        print(f"\n  GSD at 75 m AGL: {75.0/fx*100:.2f} cm/px   "
+              f"(the pipeline uses GSD = altitude / fx_px)")
 
-    out = {"device": a.device, "width": got_w, "height": got_h,
+    out = {"usable": not bad, "rejected_because": bad,
+           "tilt_coverage": cov, "tilts": [[round(x, 3), round(y, 3)] for x, y in tilts],
+           "device": a.device, "width": got_w, "height": got_h,
            "fourcc": a.fourcc, "pattern": [nx, ny], "views": len(banked_img),
            "rms_px": round(float(rms), 4),
            "per_view_err_px": [round(e, 4) for e in errs],
@@ -194,6 +313,10 @@ def main() -> int:
         for i, f in enumerate(frames):
             cv2.imwrite(str(d / f"view_{i:02d}.png"), f)
         print(f"wrote {len(frames)} frames to {d}")
+
+    if bad:
+        print("\nNot writing these anywhere. Re-run the capture.")
+        return 1
 
     print("\nPaste into the config's data_layer.feed.intrinsics:")
     print(f"      fx_px: {fx:.1f}\n      fy_px: {fy:.1f}")

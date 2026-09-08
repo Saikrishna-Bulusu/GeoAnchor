@@ -1392,6 +1392,47 @@ The generated board was checked to detect flat and under three oblique warps
 (54/54 corners each), so a detection failure is the display or the geometry,
 not the pattern.
 
+### The first run failed, and the way it failed is the thing to know
+
+8 Sept, 20 views, C270 at 1280x720: `fx = 47308.3` on a 1280 px frame. That is
+an implied **1.55 degree** horizontal field of view for a webcam that has about
+sixty, with `fy` 23% away from `fx` and radial distortion terms reaching 3e8.
+
+**A planar target cannot separate focal length from distance in a frontal
+view.** Twice as far with twice the focal length produces an identical image.
+Only perspective breaks the tie -- the near edge of the board subtending more
+pixels than the far edge. Bank twenty views by sliding the camera around
+parallel to the screen and every one is the same degenerate observation, so the
+solver runs fx off toward infinity and hides the residual in the distortion
+coefficients. It does not complain while doing it.
+
+Three defects in the first version of the script, all now fixed:
+
+- **The novelty test measured the wrong thing.** "Mean corner displacement > 40
+  px" is satisfied by pure translation, which carries no information about fx.
+  It now measures signed foreshortening -- `log(top edge / bottom edge)` and
+  `log(left / right)`, which needs no intrinsics -- and **refuses to finish
+  until it has at least `views/8` frames tilted in each of the four
+  directions**, printing which ones are still missing while you move.
+- **The per-view error was understated 7.35x.** `cv2.norm(..., NORM_L2)` is
+  already the square root of the sum of squares, so dividing by N rather than
+  sqrt(N) turned 0.89 px views into 0.12 px ones and hid the bad fit.
+- **Nothing checked the result before writing it.** `--apply` put fx = 47308
+  straight into `configs/camera.yaml`, over a comment explaining why that field
+  was deliberately empty. There is now a sanity gate on fx/width, fx-vs-fy and
+  rms, and a failing calibration writes nothing anywhere.
+
+**The sanity gate alone is not sufficient, and that is worth knowing.**
+Simulated 20 near-frontal views from a known `fx = 1150`: the solve returns
+**3584.70, an error of 212%**, and passes every sanity check -- fx/width is
+2.80, rms is 0.17. Only the tilt-coverage requirement catches it (0 views in
+all four directions). Simulated 20 tilted views return fx = 1150.00 exactly.
+So the capture-side requirement is the real defence and the output-side gate is
+just the backstop.
+
+`results/camera_intrinsics_FAILED_degenerate.json` is kept as the worked
+example.
+
 ---
 
 ## Open, in order
