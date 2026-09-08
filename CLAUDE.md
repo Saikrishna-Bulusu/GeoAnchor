@@ -1395,6 +1395,59 @@ reference is a tile of Sydney.
   marker` on most frames. Cosmetic -- every frame decodes and the shapes are
   right -- but it is noisy in logs and is the camera, not the code.
 
+### The Pi 5's OVERHEAD_MS is 3x the Xavier's, and it is the camera, not the board
+
+Measured 8 Sept 2026, same model camera as the Xavier run above -- a Logitech
+C270, `/dev/video0`, 1280x720 MJPG -- clocks pinned (`performance`,
+`scaling_min_freq == scaling_max_freq`), n=200:
+
+    stage           median      p95     Xavier median
+    capture         123.58   127.61          37.20
+    preprocess        7.92    12.45           4.20
+    encode             0.01    0.22            n/a (bus below covers it)
+    bus                0.24    0.77            1.22
+    ------------ --------- --------
+    OVERHEAD_MS    132.08   138.75           45.7
+
+**~3x the Xavier's number, and every millisecond of the gap is in `capture`.**
+Preprocess, encode and bus are the same order of magnitude or better -- this
+is the Pi, after all, and it wins every other CPU-bound stage in this project.
+
+`capture` in `measure_overhead.py` is not a fixed device latency: it is the
+time `UvcFeed.read()` blocks inside its poll loop, and that loop returns only
+when the background grabber thread has a new frame, so it is bounded below by
+1/(achieved fps), not by anything the Pi's CPU does. Confirmed directly,
+independent of this codebase, with `v4l2-ctl -d /dev/video0
+--set-fmt-video=width=1280,height=720,pixelformat=MJPG --stream-mmap
+--stream-count=60 --stream-to=/dev/null`: the raw driver climbed 1.65 -> 7.26
+-> 12.74 fps as auto-exposure settled under this room's lighting, which lands
+on the same ~8 fps average (123.58 ms is 1000/8.1) the measured run saw. The
+USB link itself is not the limit -- `lsusb -t` shows the C270 on a dedicated
+480M port, not sharing a hub with something slow.
+
+**So this is the same finding CLAUDE.md already has for a different camera
+run** ("MJPG negotiates 30 and delivers 11.9") **restated with numbers**:
+a C270 under indoor lighting does not deliver anywhere near its negotiated
+rate, and `OVERHEAD_MS` inherits that directly because the pipeline can only
+run as fast as frames arrive. Better lighting, fixed exposure/gain, or a
+different sensor would move this number a lot; nothing in `geoanchor/` would
+need to change to capture the improvement.
+
+**This changes what fits in the 250 ms budget, on this rig, today.** At
+132 ms median overhead, only about 118 ms is left for detect + match + solve
+-- not the 204 ms the Xavier's number implied. Against the pinned matcher
+totals in this file's tables, only `orb` (66-68 ms) and `akaze` (81-88 ms)
+currently fit; `edgepoint2_s64` and `xfeat_mnn` (both ~250-310 ms total) do
+not, on this camera, in this room, right now. This is a statement about this
+capture rig, not about the Pi 5's compute -- the matcher tables above were
+taken with a synthetic feed at whatever fps the demo video specifies, and
+never depended on this camera at all.
+
+**A C270 is not the flight camera, restated:** treat 132 ms as the right
+order of magnitude for a webcam on a desk, not as this project's OVERHEAD_MS
+going forward. Re-measure with the actual flight sensor before this number is
+used to accept or reject a matcher.
+
 ---
 
 ## Calibrating without a printer: put the board on a screen
