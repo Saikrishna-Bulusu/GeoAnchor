@@ -684,6 +684,45 @@ quoted anywhere.
 **A number without its clock is not a result.** That is why this is in the
 script now rather than in a commit message.
 
+### The Pi's re-run: `performance` is not pinned, and a pinned clock is not enough
+
+The check found the same trap on the other board, in a different disguise. The
+Pi 5's `performance` governor left `scaling_min_freq` at 1500000 against a
+2400000 max, so `cur_freq` could step down between reps with nothing at the
+governor level to say so. **The governor string is not the test;
+`scaling_min_freq == scaling_max_freq` is.** Like `jetson_clocks`, it does not
+survive a reboot. That means the canonical Pi table under "Pi 5 baseline to
+compare against" was taken under conditions nobody verified, and its
+cross-board comparisons should be treated as provisional until it is re-taken.
+
+**But the pinned re-run came back SLOWER, and that is the more useful finding:**
+
+    method       refkp   unpinned   pinned   ratio
+    orb           2048       57.2     67.9    1.19
+    akaze         2048       75.3     81.3    1.08
+    sift          2048      153.2    183.7    1.20
+    xfeat_mnn     2048      206.7    309.7    1.50
+    xfeat_lg      2048     2551.3   3638.0    1.43
+
+Pinning at maximum frequency cannot make a board slower, so the clock is not
+what changed. The conditions block says what did: **`loadavg` 2.90 before the
+run and 6.01 after, on four cores.** The board was three-quarters busy with
+something else before the first rep, and torch's four threads were contending
+for cores that were already taken. Clock was pinned, temperature 49.6 -> 57.3 C,
+`throttled` 0x0 -- both existing checks passed cleanly.
+
+The signature to recognise: **OpenCV methods drift 1.08-1.20x while every torch
+method drifts 1.43-1.50x.** Short, barely-threaded work rides out contention
+that sustained multi-threaded work does not. It looks exactly like a code
+regression in the torch path and it is not one.
+
+`bench_matchers.py` now warns when `loadavg` exceeds a quarter of the core
+count before the run starts. Three checks: pinned, cool, idle. The Pi's
+post-fix numbers still need one more re-take on an idle board before any of
+them are compared to the Xavier -- the within-run conclusion (edgepoint2_s64
+at 280.4 ms now beats xfeat_mnn's 309.7, so the reversal is gone) holds
+regardless, because both saw the same contention.
+
 ### The Pi 5's own pinning trap: `performance` governor is not pinned
 
 Found the same day, on this board, by the same check. `scaling_governor` was
