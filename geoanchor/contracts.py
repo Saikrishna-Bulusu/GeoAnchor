@@ -138,6 +138,18 @@ class RecordPacket:
     loop_mode: str = "open"
     sent_to_fc: bool = False
     codes: list = field(default_factory=list)
+    # Per-stage cost of this fix, in ms: decode, rectify, detect_frame,
+    # load_reference, match, ransac (plus tiles_fitted, which is a COUNT, not
+    # a time -- exclude it before summing).
+    #
+    # The processing layer has always measured these and published them on
+    # T_FIX, and until now nothing read them: they died at the bus. That made
+    # the one question a session file cannot answer "where did the 250 ms go",
+    # which is the only question worth asking about a latency budget. Summing
+    # these and subtracting from latency_ms gives everything the pipeline
+    # spends OUTSIDE the matcher -- transport, serialisation, queueing -- and
+    # that is how you tell a slow algorithm from a slow architecture.
+    stage_ms: dict = field(default_factory=dict)
     schema: int = SCHEMA_VERSION
 
 

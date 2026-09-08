@@ -702,6 +702,75 @@ which puts edgepoint2's detection near 110 ms rather than 203 ms. And the
 number that actually decides deployment is still `OVERHEAD_MS`, which needs a
 camera on the rig and has never been measured.
 
+### The architecture is not the choke point. It costs 12 ms of the 250.
+
+Asked directly on 8 Sept 2026, and worth having a number for rather than an
+opinion. `stage_ms` had been measured on every fix since the beginning and
+published on `T_FIX`, and **nothing read it** -- it died at the bus, so no
+session file could answer "where did the 250 ms go". It is now persisted into
+`RecordPacket`, which is what makes the table below reproducible from any run.
+
+Sydney replay, Xavier at MAXN pinned, `edgepoint2_s64`, k=2048, 10 tiles
+median, steady state (first three frames dropped -- frame 1 costs 3.2 s of
+lazy model load):
+
+    stage              median      p95
+    decode                3.1      3.4      cv2.imdecode of a 53 KiB JPEG
+    rectify               1.8      3.1
+    detect_frame        230.8    284.6      <-- 56% of everything
+    load_reference        1.0     22.2      warm; 22 ms p95 is a cold tile
+    match               143.6    172.9      <-- 35%
+    ransac               15.6     22.2
+    -----------------------------------
+    COMPUTE sum         411.7    461.4
+    latency_ms          579.4    690.0
+    NON-COMPUTE         164.6    253.4
+
+That 164.6 ms gap looks like architecture overhead. It is not. Two
+measurements separate them:
+
+**Transport, measured directly** -- a 53 KiB JPEG through the same `ipc://`
+socket the data layer uses, publish timestamp to subscriber receipt, n=195:
+
+    median 1.22 ms   p95 1.57 ms   max 2.13 ms
+
+and `json.dumps` of a full fix header is 0.028 ms. ZeroMQ plus serialisation
+is **under 1.3 ms**, or half a percent of the budget.
+
+**The rest is queueing, and it is self-inflicted by the feed rate.** Compute is
+412 ms, so the board sustains about 2.4 fps; the config asks for 4. Frames
+arrive every 250 ms into a loop that consumes one every 412 ms, so the freshest
+frame available at drain time is already 0-250 ms old. Re-running the identical
+pipeline at `fps: 2` -- a 500 ms feed period, slower than compute, so nothing
+ever queues -- collapses it:
+
+    feed rate            compute    latency    NON-COMPUTE
+    4 fps (250 ms)         411.7      579.4      164.6
+    2 fps (500 ms)         370.9      383.1       12.3   p95 17.7
+
+**12.3 ms.** That is the whole cost of the three-process split: JPEG encode,
+the ipc hop, the covariance call and logging, end to end. The architecture
+spends 5% of the budget; the detector spends 92%.
+
+Three things follow:
+
+- **Asking for more frames than the board can match makes latency worse, not
+  throughput better.** 4 fps costs 196 ms of pure staleness against 2 fps and
+  returns no extra fixes, because the conflating drain throws the surplus away
+  anyway. Set `feed.fps` to what the board sustains. This is free.
+- The bus design is already right and should not be touched. PUB drops rather
+  than blocks, `SNDHWM` is 8, and `drain(keep_latest_of=[T_FRAME])` collapses a
+  backlog to the newest frame. Backpressure is bounded; latency does not run
+  away. Splitting into three processes to get fault isolation cost 12 ms and
+  the isolation is real.
+- **Do not optimise the plumbing.** Every millisecond of the transport, the
+  serialisation and the process boundaries together is 1/17th of one call to
+  `detect_frame`. There is no version of this where rewriting the bus matters.
+
+Reproduce with: `bash run.sh --no-api`, then sum `stage_ms` per record from
+`runs/<id>/records.jsonl` (excluding `tiles_fitted`, which is a count) and
+subtract from `latency_ms`.
+
 ---
 
 ## Latency, and why it is the binding constraint
@@ -749,6 +818,14 @@ field has far more range than Eq. 7 can use.
 ---
 
 ## Portability across boards
+
+**Moving the project to a new board: read `docs/PI5_HANDOFF.md`.** It is the
+migration checklist -- what git does not carry, the five traps in the order
+they bite, the Pi's equivalent of `jetson_clocks`, and the Xavier numbers to
+diff against. `bash scripts/pack_for_board.sh` builds the tarball of exactly
+the gitignored payload (166 MB: `stores/`, `data/sydney/`, `demo/`,
+`results/`); `--with-env80` adds the 2.4 GB AnyVisLoc scenes. Copying
+`stores/` is what lets the second board skip rasterio/GDAL entirely.
 
 Nothing in `geoanchor/` or `configs/` contains an absolute path, and it must
 stay that way. `config.REPO_ROOT` is derived from `__file__`, and

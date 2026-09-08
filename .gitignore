@@ -13,3 +13,5 @@ dashboard/out/
 .DS_Store
 data
 .logs/
+
+geoanchor-payload-*.tar.gz

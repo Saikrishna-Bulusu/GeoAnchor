@@ -259,7 +259,7 @@ class OutputLayer:
             accepted=bool(fix["accepted"]), sigma_m=fix.get("sigma_m"),
             inliers=fix.get("inliers", 0), latency_ms=fix.get("latency_ms"),
             method=fix.get("method", ""), loop_mode=self.loop_mode,
-            sent_to_fc=sent, codes=codes)
+            sent_to_fc=sent, codes=codes, stage_ms=fix.get("stage_ms") or {})
         try:
             self.rec.append(record)
         except OSError as exc:
