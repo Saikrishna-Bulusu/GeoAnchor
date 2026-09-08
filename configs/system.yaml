@@ -37,39 +37,40 @@ data_layer:
     type: file             # file | uvc | rtsp
     path: demo/flight.mp4
     sidecar: demo/flight_gt.jsonl   # per-frame truth, replay only
-    # PUBLISH RATE, and it is a latency knob, not a throughput one.
+    # PUBLISH RATE. `auto` paces the feed to whatever the processing layer
+    # actually sustains on this board, so no board needs a hand-tuned number.
     #
-    # The processing layer conflates: drain(keep_latest_of=[T_FRAME]) throws
-    # away everything but the newest queued frame. So publishing faster than
-    # the board can match does not buy fixes -- it buys a frame that has been
-    # sitting in the queue. Measured on the Xavier, 8 Sept 2026, sydney replay,
-    # edgepoint2_s64, ~410 ms of compute per fix (n=170-240 each):
+    # It is a latency knob, not a throughput one. The processing layer
+    # conflates -- drain(keep_latest_of=[T_FRAME]) keeps only the newest queued
+    # frame -- so publishing faster than the board can match does not buy
+    # fixes, it buys a frame that has been sitting in the queue. Measured on
+    # the Xavier, 8 Sept 2026, edgepoint2_s64, ~410 ms per fix:
     #
     #     fps   fixes/s   latency med   staleness   err_m med
     #       2      2.01         390.6        12.1      0.0057
     #       4      2.60         506.5       136.0      0.0057
     #       8      2.49         462.7        66.5      0.0059
     #      16      2.23         482.0        45.3      0.0057
-    #      30      1.87         712.5       190.2      0.0059   <- encode
-    #                                                              steals cores
-    # "staleness" is latency minus the summed stage_ms: everything outside the
-    # matcher. It is nearly all queue wait, and it falls again above 4 fps
-    # because a fuller queue means a fresher newest -- but by 30 fps the data
-    # layer is burning cores encoding frames nobody will match, and compute
-    # itself rises from 379 to 518 ms. Accuracy is flat 2-16.
+    #      30      1.87         712.5       190.2      0.0059
     #
-    # 2 is chosen because latency is the binding constraint and rate is not:
-    # ArduPilot's ExternalNav path has no minimum-rate check above 1 Hz, so
-    # 2.01 fixes/s has margin, and the trade is 23% of the fix rate for 116 ms.
-    # Pick 8 instead if fix rate ever starts to matter.
+    # "staleness" is latency minus the summed stage_ms. It falls again above
+    # 4 fps because a fuller queue means a fresher newest, then reverses at 30
+    # where the data layer is encoding frames nobody will match on the same
+    # cores and compute itself rises 379 -> 518 ms.
     #
-    # THIS NUMBER IS BOARD-SPECIFIC. It is right where a fix costs ~410 ms.
-    # A board that matches in 250 ms wants 4, not 2 -- re-measure with the
-    # table above rather than inheriting this. Note also that flight.mp4 is
-    # natively 4 fps, so 2 replays the synthetic sweep at half speed; that is
-    # harmless here only because CLAUDE.md already rules the feed's 85.6 m/s
-    # out as something to tune against.
-    fps: 2
+    # `auto` targets the left-hand side: publish one frame every
+    # (median stage_ms x fps_margin), so the CONSUMER waits on an empty queue
+    # rather than the frame waiting in it. On the Xavier it settles near 2.2,
+    # on a Pi 5 near 3.2 -- the two numbers that had to be maintained by hand.
+    # See geoanchor/data_layer/pacer.py for why it paces off stage_ms and not
+    # the fix interval (the latter is a feedback loop that converges on the
+    # floor).
+    #
+    # Set a number instead to pin the rate -- benchmarking wants a fixed one,
+    # and scripts/feed_fps_sweep.py reproduces the table above.
+    fps: auto
+    fps_margin: 1.15       # publish period = service time x this
+    fps_bounds: [0.5, 10]  # clamp; also the rate used before the first fix
     loop: false
     realtime: true         # false makes a replay run as fast as it can
     device: 0              # uvc: /dev/videoN

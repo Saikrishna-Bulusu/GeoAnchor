@@ -481,6 +481,57 @@ Two things follow, and both were got wrong once already:
   core and loses to the Pi 5's A76 per clock, so the Xavier's one advantage on
   CPU -- eight cores instead of four -- is mostly unavailable here.
 
+### The Pi 5 wins every matcher except EdgePoint2, and that one reverses
+
+Filled in on the Pi 5, 8 Sept 2026 (`results/bench_matchers_pi5.json`),
+`performance` governor, idle board, `vcgencmd get_throttled` 0x0 at 51.6 C.
+Same geometry as the table above: 1 tile, 2048 reference keypoints, 646x484
+frame, p95 of 15 reps.
+
+    method            Pi detect   Pi match   Pi total   Xavier total
+    orb                    27.6       29.6       57.2           96.6
+    sift                   85.0       68.2      153.2          197.5
+    akaze                  57.3       18.0       75.3          157.1
+    xfeat_mnn             176.1       30.6      206.7          291.9
+    edgepoint2_s64        183.5       89.1      272.5          223.9   <-- reversed
+
+The prediction in the handoff -- "if the 1.4-2.0x per-core gap holds,
+edgepoint2's detection lands near 110 ms" -- was wrong, and wrong in an
+instructive way. **Detection barely moved** (183.5 against ~203, only 1.1x)
+and **matching went the wrong way by 4.3x** (89.1 against 20.7). The board that
+loses on every other matcher wins this one.
+
+The split is the explanation, not the total. Detection is a CNN forward pass
+that does not thread -- the Xavier's own numbers say 8 threads buys 1.26x on
+detect and 1.57x on match -- so on detection the two boards are close and the
+A76's per-clock edge is mostly spent. Matching is a 2048x2048 matmul over 64-D
+descriptors, which threads well, and there the Xavier's eight cores finally pay
+for themselves against the Pi's four.
+
+Two things make this worth chasing rather than accepting:
+
+- **On the same board, edgepoint2's match costs 3x xfeat_mnn's** (89.1 against
+  30.6) for the same descriptor width and the same keypoint counts. On the
+  Xavier it is the other way round (20.7 against 28.6). Same linear algebra,
+  opposite ranking: that is an implementation difference, not a board one.
+- The leading suspect is **`WIDE_REF`**. `EdgePoint2Method.match` picks its
+  reduction axis by reference size and below 20000 takes `cossim.max(dim=0)`,
+  a reduction over the strided axis of a 2048x2048 tensor. 20000 was fitted to
+  the Xavier's cache and the handoff already flagged it as the one constant
+  that would not transfer. If the Pi's crossover is below 2048, it is currently
+  taking the wrong branch on every frame.
+
+**Test it on the Pi before concluding anything about the board:** force the
+two-matmul branch (`WIDE_REF = 0`) and re-run `bench_matchers.py --tiles 1`.
+If match drops toward 30 ms the constant is the bug and edgepoint2 is fine
+there; if it does not, the four-core matmul gap is real and edgepoint2 belongs
+on the Xavier.
+
+This matters more at deployed geometry than the table shows. Match is linear in
+reference keypoints, so a 4.3x match penalty at 1 tile becomes the dominant
+term at the 9-13 tiles the prior actually selects -- extrapolating, ~800 ms
+against the Xavier's measured 171 ms.
+
 ### On ARM, XFeat is slower than SIFT -- on both boards
 
 XFeat's own README claims it is "faster than SIFT on CPU", and the paper's CPU
@@ -809,12 +860,57 @@ So there are two defensible settings and they optimise different things:
 4 fps -- the video's native rate, and the previous default -- is the worst of
 the three: it publishes slowly enough to be stale but fast enough to queue.
 
-**Do not inherit `fps: 2` onto another board.** It is correct where a fix costs
-~410 ms. A board that matches in 250 ms wants 4. Re-run this sweep rather than
-copying the number; `configs/system.yaml` carries the table for that reason.
-The portable fix -- have the data layer pace itself to the processing layer's
-observed rate instead of a hardcoded constant -- is not written, and is the
-obvious thing to do if a third board turns up.
+### `fps: auto` -- so no board needs the number at all
+
+Written 8 Sept 2026, once the Pi 5 had confirmed the same non-monotonic shape
+and there were two hand-tuned constants to keep in sync. `geoanchor/data_layer/
+pacer.py`; `fps: auto` is now the default in `configs/system.yaml`.
+
+The rule is one line: **publish one frame every (median `stage_ms` x
+`fps_margin`)**, so the consumer waits on an empty queue rather than the frame
+waiting in it. Default margin 1.15, clamped to `fps_bounds` [0.5, 10].
+
+Two decisions in it are load-bearing:
+
+- **It paces off `sum(stage_ms)`, not the fix interval.** The interval is the
+  obvious signal and it is poisoned: it is partly set by how fast we publish,
+  so pacing off it feeds its own output back in -- publish slower, fixes arrive
+  slower, conclude the board got slower, publish slower still, converge on the
+  floor. `stage_ms` is the consumer's intrinsic cost and does not move when the
+  publish rate does (379-388 ms across the 2, 4 and 8 fps arms), which is the
+  property a control input needs. Persisting `stage_ms` turned out to matter
+  for more than post-hoc analysis.
+- **It starts at the LOWER bound and adapts up.** The first fix on a cold
+  process pays the model load -- 3.2 s against a 0.41 s steady state -- so the
+  first three are discarded, and starting at the top would spend the entire
+  warmup in exactly the regime the pacer exists to avoid.
+
+Median over a 15-fix window, 10% hysteresis, so one 7 s `xfeat_lg` failure or a
+cold tile load does not re-rate the feed. The data layer takes a read-only
+`Subscriber` on the processing layer's socket with a zero timeout: a processing
+layer that dies costs the feed nothing, it just stops being re-rated. Layer
+independence is unchanged.
+
+Measured against the two pinned rates it replaces, same board, same 100 s:
+
+    config          fixes/s   compute   latency   staleness   acc%    err_m
+    pinned fps 2       2.01     379.0     390.6        12.1   82.2   0.0057
+    pinned fps 4       2.60     370.0     506.5       136.0   77.9   0.0057
+    auto               2.12     387.4     409.4        10.9   83.9   0.0057
+
+It converges 0.5 -> 1.91 -> 2.40 fps within about fifteen fixes and holds.
+Against the hand-tuned 2 it gives up 19 ms of median latency and takes back 5%
+of the fix rate and the lowest staleness of the three; against 4 it is 97 ms
+better. The point is not that it wins either column outright -- it is that the
+number is now derived on whatever board is running, and the Xavier's 2 and the
+Pi's 3.2 stop being two constants somebody has to remember to re-measure.
+
+`fps: auto` is rejected on a `uvc` or `rtsp` feed (`DLE-14`) because there the
+number is what the CAMERA is asked to produce, and pacing it down discards
+frames at the sensor rather than at the queue -- the opposite of what a
+conflating consumer wants. Subsampling on read is the right answer there and is
+not written. Pin a number to benchmark; `scripts/feed_fps_sweep.py` reproduces
+the table above.
 
 ---
 

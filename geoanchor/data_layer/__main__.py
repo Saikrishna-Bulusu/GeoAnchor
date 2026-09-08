@@ -18,12 +18,13 @@ from pathlib import Path
 from .. import config as cfgmod
 from .. import contracts as K
 from .. import device
-from ..bus import BindError, CommandServer, Publisher
+from ..bus import BindError, CommandServer, Publisher, Subscriber
 from ..contracts import FramePacket, MapPacket, StatusPacket, to_dict
 from ..logbus import LayerLog, resolve_run_dir
 from .feed import FeedError, Preprocessor, open_feed
 from .gpsin import GpsError, ReplayGps, VehicleState, open_gps
 from .mapprep import MapPrepError, build_store, build_store_from_image
+from .pacer import AdaptivePacer
 
 LAYER = "data"
 MAP_REPUBLISH_S = 3.0
@@ -45,6 +46,8 @@ class DataLayer:
         self._last_status = 0.0
         self._rate_window: list = []
         self._dropped = 0
+        self.pacer: AdaptivePacer | None = None
+        self.fixsub: Subscriber | None = None
 
         try:
             self.pub = Publisher(cfg.get("bus.data_pub"))
@@ -125,11 +128,42 @@ class DataLayer:
                 resolved = self.cfg.resolve(f"data_layer.feed.{key}")
                 if resolved:
                     fc[key] = str(resolved)
+        # `fps: auto` means "pace to whatever the processing layer sustains".
+        # The feed still needs a number to start with, because the first fix
+        # has not happened yet; it takes the LOWER bound, so a slow board is
+        # never flooded during the seconds before the pacer has an estimate.
+        # Starting at the upper bound and adapting down would spend the whole
+        # warmup in the regime the pacer exists to avoid.
+        if str(fc.get("fps", "")).strip().lower() == "auto":
+            # Only for feeds this layer paces itself. On a uvc or rtsp feed
+            # `fps` is what the CAMERA is asked to produce, and pacing that
+            # down would throw away frames at the sensor instead of at the
+            # queue -- the opposite of what a conflating consumer wants. The
+            # right answer there is to subsample on read, which is not written.
+            if fc.get("type", "file") in ("file", "env80"):
+                self.pacer = AdaptivePacer(
+                    margin=float(fc.get("fps_margin", 1.15)),
+                    bounds=tuple(fc.get("fps_bounds", [0.5, 10.0])))
+                fc = dict(fc, fps=self.pacer.lo)
+            else:
+                fc = dict(fc, fps=30.0)
+                self.log.error("DLE-14", f"fps: auto is not supported on a "
+                                         f"'{fc.get('type')}' feed -- that number is the "
+                                         f"camera's rate, not a pacing knob. Using 30.")
         try:
             self.feed = open_feed(fc)
         except FeedError as exc:
             self.log.emit(exc.code, str(exc))
             raise SystemExit(2)
+        if self.pacer is not None:
+            # Read-only tap on the processing layer's own output. The data
+            # layer stays a pure publisher on its own socket -- this subscribes
+            # to someone else's, so nothing about the layer independence
+            # changes: if the processing layer dies, no fixes arrive, the rate
+            # simply stops being updated and the feed keeps running.
+            self.fixsub = Subscriber([self.cfg.get("bus.processing_pub")], [K.T_FIX])
+            self.log.step("DL-21", f"pacing to the processing layer, starting at "
+                                   f"{self.pacer.lo:g} fps", **self.pacer.describe())
         self.pre = Preprocessor(
             intrinsics=fc.get("intrinsics") or {},
             fallback_long_edge=fc.get("frame_px", 512),
@@ -166,7 +200,7 @@ class DataLayer:
             layer=LAYER, t_unix=K.now_unix(), ready=ready, uptime_s=round(self.log.uptime(), 1),
             last_code=self.log.last_code, counts=self.log.tally(), rate_hz=round(rate, 2),
             config={
-                "feed": self.feed.describe() if self.feed else None,
+                "feed": self._feed_desc(),
                 "gps": self.gps.describe() if self.gps else None,
                 "map": {"store_id": self.manifest["store_id"], "tiles": self.manifest["n_tiles"],
                         "gsd_m_px": self.manifest["gsd_m_px"], "method": self.manifest["method"]}
@@ -179,6 +213,41 @@ class DataLayer:
         self.pub.send(K.T_STATUS, to_dict(st))
         self._last_status = now
 
+    def _feed_desc(self) -> dict | None:
+        # feed.describe() already reports the LIVE fps, because the pacer
+        # mutates feed.fps in place. Adding the pacer's own state next to it is
+        # what makes an adapting rate legible instead of looking like drift.
+        if self.feed is None:
+            return None
+        d = self.feed.describe()
+        if self.pacer is not None:
+            d["pacer"] = self.pacer.describe()
+        return d
+
+    def retune(self) -> None:
+        """Consume any fixes the processing layer has published and re-pace.
+
+        Non-blocking by construction: a zero timeout means a processing layer
+        that has stopped answering costs this loop nothing, which is the whole
+        reason the layers are separate processes.
+        """
+        if self.pacer is None or self.fixsub is None or self.feed is None:
+            return
+        changed = False
+        while True:
+            msg = self.fixsub.recv(0)
+            if msg is None:
+                break
+            _, header, _ = msg
+            changed |= self.pacer.observe(header.get("stage_ms"))
+        if changed:
+            self.feed.fps = self.pacer.fps
+            self.log.throttled("DL-21", 10.0,
+                               f"{self.pacer.fps:.2f} fps "
+                               f"({self.pacer.service_ms:.0f} ms per fix "
+                               f"x{self.pacer.margin:g})",
+                               **self.pacer.describe())
+
     # -- the loop ----------------------------------------------------------
     def run(self) -> int:
         self.start()
@@ -189,6 +258,7 @@ class DataLayer:
 
         while self.running:
             self.handle_commands()
+            self.retune()
             if self.paused:
                 self.publish_status(note="paused")
                 time.sleep(0.2)
@@ -356,6 +426,8 @@ class DataLayer:
         time.sleep(0.2)
         self.log.close()
         self.pub.close()
+        if self.fixsub is not None:
+            self.fixsub.close()
         self.ctl.close()
 
 

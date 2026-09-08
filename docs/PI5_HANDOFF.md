@@ -121,9 +121,16 @@ Matched geometry -- 1 tile, 2048 reference keypoints, p95 of 15 reps
     akaze                 107.5        157.1   1.46x slower
     xfeat_mnn             161.6        291.9   1.81x slower
     xfeat_lg             2108.6       2655.9   1.26x slower
-    edgepoint2_s64            ?        223.9   <-- THE MISSING ROW
+    edgepoint2_s64          272.5      223.9   <-- FILLED 8 Sept, and it REVERSED
 
-**Getting that last row is the first job on the Pi.** EdgePoint2 is the
+That row landed on 8 Sept and did not go as predicted: the Pi's detection is
+only 1.1x better (183.5 vs ~203 ms) while its matching is 4.3x WORSE (89.1 vs
+20.7 ms), because detection does not thread and matching does -- so the
+Xavier's eight cores win the matmul against the Pi's four. See "The Pi 5 wins
+every matcher except EdgePoint2" in `CLAUDE.md`, including the `WIDE_REF`
+hypothesis and the one-command test for it, which is now the open question.
+
+**The original note, kept because the reasoning is what was wrong:** EdgePoint2 is the
 pipeline's current default (`configs/system.yaml`, gate 8, k=2048) and it has
 never run on a Pi. If the 1.4-2.0x per-core gap holds, its 203 ms detection
 lands near 110 ms there, which is the difference between missing the EKF3

@@ -41,6 +41,9 @@ DL = {
     "DL-18": "all three inputs live -- layer ready",
     "DL-19": "feed reached end of stream",
     "DL-20": "layer stopped cleanly",
+    # Appended after DL-20 because this registry is append-only, not because
+    # it belongs at the end of the layer's life. See "Step codes" in CLAUDE.md.
+    "DL-21": "feed rate re-paced to the processing layer",
 }
 DLE = {
     "DLE-01": "configuration invalid or missing a required key",
@@ -56,6 +59,7 @@ DLE = {
     "DLE-11": "GPS stale beyond the configured timeout",
     "DLE-12": "altitude outside the 50-100 m AGL envelope",
     "DLE-13": "no camera intrinsics configured -- undistortion skipped",
+    "DLE-14": "fps: auto requested on a feed whose rate this layer does not control",
 }
 DLDE = {
     "DLDE-01": "camera device node not present",
