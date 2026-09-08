@@ -44,6 +44,7 @@ DL = {
     # Appended after DL-20 because this registry is append-only, not because
     # it belongs at the end of the layer's life. See "Step codes" in CLAUDE.md.
     "DL-21": "feed rate re-paced to the processing layer",
+    "DL-22": "static bench altitude in use -- no real altitude source",
 }
 DLE = {
     "DLE-01": "configuration invalid or missing a required key",

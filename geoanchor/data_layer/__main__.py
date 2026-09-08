@@ -46,6 +46,7 @@ class DataLayer:
         self._last_status = 0.0
         self._rate_window: list = []
         self._dropped = 0
+        self.static_alt = None
         self.pacer: AdaptivePacer | None = None
         self.fixsub: Subscriber | None = None
 
@@ -168,6 +169,12 @@ class DataLayer:
             intrinsics=fc.get("intrinsics") or {},
             fallback_long_edge=fc.get("frame_px", 512),
             jpeg_quality=fc.get("jpeg_quality", 80))
+        sa = fc.get("static_altitude_m")
+        self.static_alt = float(sa) if sa is not None else None
+        if self.static_alt is not None:
+            self.log.step("DL-22", f"static bench altitude {self.static_alt:g} m AGL "
+                                   f"configured -- used only if nothing real supplies one",
+                          altitude_m=self.static_alt)
         if not self.pre.fx_px:
             self.log.error("DLE-13", "no fx_px or focal_mm/pixel_pitch_um configured, so frames "
                                      "cannot be scaled to the reference GSD")
@@ -222,6 +229,9 @@ class DataLayer:
         d = self.feed.describe()
         if self.pacer is not None:
             d["pacer"] = self.pacer.describe()
+        if self.static_alt is not None:
+            d["static_altitude_m"] = self.static_alt
+            d["altitude_is_assumed"] = True
         return d
 
     def retune(self) -> None:
@@ -284,6 +294,22 @@ class DataLayer:
                 self.log.throttled("DLE-11", 10.0, age_s=round(self.state.gps_age(), 1))
 
             alt = self.state.rel_alt_m if self.state.rel_alt_m is not None else meta.get("alt_agl_m")
+            if alt is None and self.static_alt is not None:
+                # LAST RESORT, AND IT MUST BE LOUD. GSD = altitude / fx_px, so
+                # with intrinsics measured this is the only remaining input the
+                # scale path needs -- but a made-up altitude produces a
+                # confident, wrong GSD rather than an obvious failure, and a fix
+                # computed against it is geometrically meaningless. It is here
+                # so the bench rig can exercise the whole path end to end, and
+                # it never overrides a real altitude: this branch is reached
+                # only when both the vehicle state and the frame metadata have
+                # nothing. It announces itself on every heartbeat as well as
+                # here, so a run cannot quietly turn out to have used it.
+                alt = self.static_alt
+                self.log.throttled("DL-22", 30.0,
+                                   f"assuming {self.static_alt:g} m AGL -- BENCH ONLY, "
+                                   f"no fix from this run means anything in metres",
+                                   altitude_m=self.static_alt)
             if alt is not None and not (agl_min <= alt <= agl_max):
                 self.log.throttled("DLE-12", 10.0, altitude_m=round(float(alt), 1),
                                    envelope=f"{agl_min}-{agl_max}")

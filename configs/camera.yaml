@@ -60,6 +60,22 @@ data_layer:
     width: 1280
     height: 720
     fourcc: MJPG           # see configs/system.yaml -- this is 30 fps vs 10 fps
+
+    # BENCH ONLY. GSD = altitude / fx_px, so with the intrinsics measured this
+    # is the last input the scale path needs -- and on a desk there is no real
+    # altitude to have. Setting it lets the whole path run end to end, and it
+    # is used ONLY when neither the vehicle state nor the frame metadata
+    # supplies one, so it can never override a real source.
+    #
+    # NO FIX FROM A RUN USING THIS MEANS ANYTHING IN METRES. It is announced at
+    # startup and every 30 s (DL-22) and carried in the status heartbeat as
+    # `altitude_is_assumed`, so a run cannot quietly turn out to have used it.
+    #
+    # 75 m is the reference tile's own design altitude, which puts the frame
+    # scale near the middle of its usable range rather than against a clamp.
+    # Replace with the FC's barometric AGL over MAVLink when that is wired --
+    # ArduPilot publishes it in GLOBAL_POSITION_INT.relative_alt.
+    static_altitude_m: 75.0
     fps: 30
     frame_px: 512
     jpeg_quality: 80
