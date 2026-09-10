@@ -1,0 +1,97 @@
+{
+  "frame": [
+    484,
+    646
+  ],
+  "reps": 3,
+  "conditions_before": {
+    "torch": "2.10.0+cpu",
+    "torch_threads": 24,
+    "machine": "x86_64",
+    "board": {
+      "kind": "generic",
+      "model": "unknown",
+      "cores": 32
+    },
+    "governor": "powersave",
+    "min_khz": "800000",
+    "max_khz": "5600000",
+    "cur_khz": "800000",
+    "pinned": false,
+    "loadavg": 2.7666015625,
+    "temp_c": 59.0,
+    "throttled": null,
+    "power_w": null
+  },
+  "conditions_after": {
+    "torch": "2.10.0+cpu",
+    "torch_threads": 24,
+    "machine": "x86_64",
+    "board": {
+      "kind": "generic",
+      "model": "unknown",
+      "cores": 32
+    },
+    "governor": "powersave",
+    "min_khz": "800000",
+    "max_khz": "5600000",
+    "cur_khz": "3076115",
+    "pinned": false,
+    "loadavg": 3.66650390625,
+    "temp_c": 62.0,
+    "throttled": null,
+    "power_w": null
+  },
+  "rows": [
+    {
+      "method": "akaze",
+      "store": "satellite_map__akaze__93d153e7078fb28d",
+      "tiles": 1,
+      "ref_keypoints": 2048,
+      "detect_ms": 16.8,
+      "match_ms": 1.1,
+      "total_ms": 17.9,
+      "total_p95_ms": 19.2
+    },
+    {
+      "method": "orb",
+      "store": "satellite_map__orb__f117c1bc75a30312",
+      "tiles": 1,
+      "ref_keypoints": 2048,
+      "detect_ms": 8.1,
+      "match_ms": 3.7,
+      "total_ms": 11.8,
+      "total_p95_ms": 12.0
+    },
+    {
+      "method": "sift",
+      "store": "satellite_map__sift__d6991dcfd17b50dd",
+      "tiles": 1,
+      "ref_keypoints": 2048,
+      "detect_ms": 32.6,
+      "match_ms": 6.8,
+      "total_ms": 39.4,
+      "total_p95_ms": 39.8
+    },
+    {
+      "method": "xfeat_lg",
+      "store": "satellite_map__xfeat_lg__e98187521b1622a3",
+      "tiles": 1,
+      "ref_keypoints": 2048,
+      "detect_ms": 38.3,
+      "match_ms": 774.7,
+      "total_ms": 813.1,
+      "total_p95_ms": 819.5
+    },
+    {
+      "method": "xfeat_mnn",
+      "store": "satellite_map__xfeat_mnn__02f7ac091dc857cb",
+      "tiles": 1,
+      "ref_keypoints": 2048,
+      "detect_ms": 29.6,
+      "match_ms": 11.8,
+      "total_ms": 41.3,
+      "total_p95_ms": 41.9
+    }
+  ]
+}

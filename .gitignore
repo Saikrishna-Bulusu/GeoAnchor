@@ -15,3 +15,5 @@ data
 .logs/
 
 geoanchor-payload-*.tar.gz
+fleet/
+.metadata_cache/

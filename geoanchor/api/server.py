@@ -252,6 +252,46 @@ def create_app(cfg: cfgmod.Config):
             raise HTTPException(404, "no such run")
         return FileResponse(p, media_type="application/json")
 
+    # ------------------------------------------------------------ fleet ----
+    # Sessions from OTHER devices, read out of a clone of the logs repo. The
+    # layout is <fleet_dir>/<device>/<run>/session.json, which is exactly what
+    # scripts/sync_logs.sh pushes.
+    #
+    # Read-only and entirely separate from `runs`: this API never writes into
+    # the clone and never runs git. Syncing is a scheduled job on each device,
+    # so a board that is off, or a laptop with no network, degrades to "its
+    # runs are not listed yet" rather than to a failed request here.
+
+    @app.get("/api/fleet")
+    def fleet():
+        root = cfg.resolve("session.fleet_dir", "fleet")
+        if not root or not root.is_dir():
+            return {"available": False, "devices": [], "runs": []}
+        out = []
+        for dev in sorted(p for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")):
+            for d in dev.iterdir():
+                s = d / "session.json"
+                if s.exists():
+                    st = s.stat()
+                    out.append({"device": dev.name, "name": d.name,
+                                "size": st.st_size, "modified": st.st_mtime})
+        out.sort(key=lambda r: r["modified"], reverse=True)
+        return {"available": True,
+                "devices": sorted({r["device"] for r in out}),
+                "runs": out}
+
+    @app.get("/api/fleet/{device}/{name}")
+    def fleet_session(device: str, name: str):
+        root = cfg.resolve("session.fleet_dir", "fleet")
+        if not root or not root.is_dir():
+            raise HTTPException(404, "no fleet directory")
+        p = (root / device / name / "session.json").resolve()
+        # Same containment check as /api/runs/{name}: `device` and `name` come
+        # off the wire, so ../.. in either would otherwise escape the clone.
+        if root.resolve() not in p.parents or not p.exists():
+            raise HTTPException(404, "no such run")
+        return FileResponse(p, media_type="application/json")
+
     @app.get("/api/export")
     def export():
         """The JSON the professor asked for: time step, actual, predicted, error."""

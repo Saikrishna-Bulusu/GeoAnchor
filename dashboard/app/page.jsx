@@ -1,31 +1,65 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import CameraView from '@/components/CameraView';
-import Charts from '@/components/Charts';
 import ControlBar from '@/components/ControlBar';
 import LayerCards from '@/components/LayerCards';
-import MapView from '@/components/MapView';
+import MetricChart from '@/components/MetricChart';
+import PipelineStrip from '@/components/PipelineStrip';
 import RecordTable from '@/components/RecordTable';
 import Stats from '@/components/Stats';
 import StepProgress from '@/components/StepProgress';
+import TrackMap from '@/components/TrackMap';
 import { apiBase, downloadJSON, getJSON } from '@/lib/api';
 import { useTelemetry } from '@/lib/useTelemetry';
+import { BANDS, CFG } from '@/lib/thresholds';
 
 const DEFAULT_MODE = process.env.NEXT_PUBLIC_GEOANCHOR_MODE || 'live';
 
+// The four graphs the design specifies, in its order. `loss` is deliberately
+// not among them: it is a function of `e` and sigma, so it earns a column in
+// the table but not a quarter of the screen.
+const GRAPHS = ['ms', 'e', 'inl', 'alt'];
+
+// What the map can colour the track by. Same keys, same bands, so a red
+// stretch of track and a red patch of graph mean the same thing.
+const METRICS = [['ms', 'latency'], ['e', 'error'], ['inl', 'inliers'], ['alt', 'altitude']];
+
 export default function Page() {
   const [mode, setMode] = useState(DEFAULT_MODE);
+  const [role, setRole] = useState('user');
   const { state, connected, error, loadSession, reset } = useTelemetry(mode);
   const [methods, setMethods] = useState(null);
   const [dragging, setDragging] = useState(false);
   const [runs, setRuns] = useState([]);
+  const [fleet, setFleet] = useState(null);
+  const [device, setDevice] = useState(null);
   const fileInput = useRef(null);
+
+  // Map + graph interaction, shared so that hovering a graph moves the map
+  // cursor and vice versa. `cursor` is a committed pick, `hover` is transient,
+  // `sel` is a dragged range and `domain` is the graph x-zoom.
+  const [metric, setMetric] = useState('ms');
+  const [cursor, setCursor] = useState(null);
+  const [hover, setHover] = useState(null);
+  const [sel, setSel] = useState(null);
+  const [domain, setDomain] = useState(null);
+  const [follow, setFollow] = useState(true);
+  const [expanded, setExpanded] = useState(null);
 
   useEffect(() => {
     if (mode !== 'live' || !connected) return;
     getJSON('/api/methods').then(setMethods).catch(() => {});
     getJSON('/api/runs').then(setRuns).catch(() => {});
   }, [mode, connected]);
+
+  // Other devices' sessions, out of the logs-repo clone. Fetched whenever the
+  // replay panel is on screen rather than only when live, because the whole
+  // point is reviewing a board's flight from a laptop that is not on the same
+  // network as the board.
+  useEffect(() => {
+    if (mode !== 'replay') return;
+    getJSON('/api/fleet').then(setFleet).catch(() => setFleet({ available: false }));
+  }, [mode]);
 
   // Staleness is a function of elapsed time, not of arriving messages, so
   // something has to re-render when nothing is happening. Without this a layer
@@ -43,6 +77,22 @@ export default function Page() {
   const synthetic = state.header?.synthetic_from_reference
     || String(state.config?.data_layer?.feed?.path || '').includes('demo/flight');
 
+  // The thresholds the graphs and the map colour against are the running
+  // config's, not the file's defaults, whenever the board tells us what it is
+  // using. A dashboard colouring against 250 ms while the board runs 400 is
+  // worse than one that says nothing.
+  const cfg = useMemo(() => ({
+    ...CFG,
+    latency_budget_ms: budget,
+    inlier_gate: state.config?.processing_layer?.inlier_gate ?? CFG.inlier_gate,
+    loop_mode: state.config?.output_layer?.fc?.loop_mode ?? 'off',
+  }), [budget, state.config]);
+
+  const bands = useMemo(
+    () => ({ ...BANDS, ms: { ...BANDS.ms, good: budget, warn: budget * 2 } }),
+    [budget],
+  );
+
   const openFile = useCallback(async (file) => {
     try {
       loadSession(JSON.parse(await file.text()));
@@ -59,6 +109,7 @@ export default function Page() {
   // snapshot lands.
   const toggleMode = useCallback(() => {
     reset();
+    setCursor(null); setSel(null); setDomain(null);
     setMode((m) => (m === 'live' ? 'replay' : 'live'));
   }, [reset]);
 
@@ -82,6 +133,8 @@ export default function Page() {
     return { tone: 'stale', label: error ? 'no connection' : 'connecting' };
   }, [mode, connected, error]);
 
+  const admin = role === 'admin';
+
   return (
     <main className="shell" onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
           onDragLeave={() => setDragging(false)} onDrop={onDrop}>
@@ -92,6 +145,17 @@ export default function Page() {
         </div>
         <span className="spacer" />
         <span className="mode"><span className={`dot ${status.tone}`} />{status.label}</span>
+
+        {/* Role is a view filter, never a permission. The Admin view adds the
+            step codes, the record table and the camera; it unlocks nothing,
+            because the control path is the API's and is identical either way. */}
+        <div className="btn-row">
+          {['user', 'admin'].map((r) => (
+            <button key={r} className={`btn ${role === r ? 'primary' : ''}`}
+                    onClick={() => setRole(r)}>{r}</button>
+          ))}
+        </div>
+
         {/* Only while a session is actually on screen. Clearing it without
             leaving replay mode is what re-renders the picker below, so this is
             the direct route to a second file -- the alternative is a round
@@ -143,25 +207,68 @@ export default function Page() {
                 </div>
               </div>
             )}
+            {/* Every device's sessions, from the logs repo. A board that is
+                powered off is still reviewable here, which is the point:
+                its transcripts were pushed when it last had a network. */}
+            {fleet?.available && fleet.runs?.length > 0 && (
+              <div style={{ marginTop: 16, borderTop: '1px solid var(--line)', paddingTop: 14 }}>
+                <p className="note">
+                  Fleet &mdash; {fleet.runs.length} sessions from {fleet.devices.length} device
+                  {fleet.devices.length === 1 ? '' : 's'}:
+                </p>
+                <div className="btn-row" style={{ margin: '8px 0' }}>
+                  <button className={`btn ${device === null ? 'primary' : ''}`}
+                          onClick={() => setDevice(null)}>all</button>
+                  {fleet.devices.map((d) => (
+                    <button key={d} className={`btn ${device === d ? 'primary' : ''}`}
+                            onClick={() => setDevice(d)}>{d}</button>
+                  ))}
+                </div>
+                <div className="btn-row">
+                  {fleet.runs
+                    .filter((r) => device === null || r.device === device)
+                    .slice(0, 12)
+                    .map((r) => (
+                      <button key={`${r.device}/${r.name}`} className="btn"
+                              onClick={() => getJSON(`/api/fleet/${r.device}/${r.name}`)
+                                .then(loadSession)}>
+                        <span style={{ color: 'var(--ink-faint)' }}>{r.device}</span>
+                        {' / '}{r.name}
+                      </button>
+                    ))}
+                </div>
+              </div>
+            )}
+
             <p className="note" style={{ marginTop: 14 }}>
               Replay mode needs no board. It is what the Vercel deployment runs, because a
               public host cannot reach a Jetson on your network &mdash; live telemetry stays
               on the LAN and only the exported file travels.
+              {fleet && !fleet.available && (
+                <> No <code>fleet/</code> clone here yet &mdash; run{' '}
+                <code>bash scripts/sync_logs.sh</code> to pull other devices&rsquo; sessions.</>
+              )}
             </p>
           </div>
         </div>
       )}
 
-      {/* Shown in replay too. The step codes are the operational record of a
-          flight -- which layer got how far, which faults fired -- and a system
-          flown GNSS- and internet-denied is reviewed almost entirely from the
-          file afterwards, which is exactly when these used to disappear. */}
+      {/* The User view gets the three-layer summary; the Admin view gets the
+          per-layer cards and the full step-code progress underneath, which is
+          the operational record of a flight and is reviewed almost entirely
+          from the file afterwards. */}
       {Object.keys(state.layers || {}).length > 0 && (
         <>
-          <LayerCards layers={state.layers} logs={state.logs}
-                      clockOffset={state.clockOffset} replay={state.replay} />
-          <div style={{ height: 14 }} />
-          <StepProgress layers={state.layers} codes={state.codes} />
+          {admin ? (
+            <>
+              <LayerCards layers={state.layers} logs={state.logs}
+                          clockOffset={state.clockOffset} replay={state.replay} />
+              <div style={{ height: 14 }} />
+              <StepProgress layers={state.layers} codes={state.codes} />
+            </>
+          ) : (
+            <PipelineStrip layers={state.layers} record={records.at(-1)} config={cfg} />
+          )}
           <div style={{ height: 14 }} />
         </>
       )}
@@ -170,9 +277,28 @@ export default function Page() {
 
       <div style={{ height: 14 }} />
       <div className="grid main">
-        <MapView map={state.map} records={records} basemap={state.basemap} />
+        <div className="panel" style={{ display: 'flex', flexDirection: 'column' }}>
+          <header style={{ gap: 10 }}>
+            <h2>Track</h2>
+            <span className="spacer" />
+            <div className="btn-row">
+              {METRICS.map(([k, label]) => (
+                <button key={k} className={`btn ${metric === k ? 'primary' : ''}`}
+                        onClick={() => setMetric(k)}>{label}</button>
+              ))}
+              <button className={`btn ${follow ? 'primary' : ''}`}
+                      onClick={() => setFollow((f) => !f)}>follow</button>
+            </div>
+          </header>
+          <div className="body flush" style={{ height: 460 }}>
+            <TrackMap map={state.map} records={records} basemap={state.basemap}
+                      metric={metric} cursor={cursor} hover={hover} sel={sel} bands={bands}
+                      onHover={setHover} onPick={setCursor} follow={follow} />
+          </div>
+        </div>
+
         <div className="grid" style={{ gap: 14 }}>
-          {mode === 'live' && <CameraView frame={state.frame} />}
+          {mode === 'live' && admin && <CameraView frame={state.frame} />}
           {mode === 'live' && (
             <ControlBar layers={state.layers} methods={methods} disabled={!connected} />
           )}
@@ -195,10 +321,47 @@ export default function Page() {
       </div>
 
       <div style={{ height: 14 }} />
-      <Charts records={records} budgetMs={budget} />
+      <div className="panel">
+        <header>
+          <h2>Metrics</h2>
+          <span className="spacer" />
+          <span className="note" style={{ fontSize: 11 }}>
+            drag to select &middot; wheel to zoom time
+          </span>
+          {domain && (
+            <button className="btn" onClick={() => setDomain(null)}>reset zoom</button>
+          )}
+        </header>
+        <div className="body">
+          <div className="grid cols-2">
+            {GRAPHS.map((m) => (
+              <div key={m}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+                  <b style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '.07em' }}>
+                    {bands[m].label}
+                  </b>
+                  <span className="note" style={{ fontSize: 11 }}>{bands[m].why}</span>
+                  <span className="spacer" />
+                  <button className="btn" onClick={() => setExpanded(expanded === m ? null : m)}>
+                    {expanded === m ? 'shrink' : 'expand'}
+                  </button>
+                </div>
+                <MetricChart records={records} metric={m} domain={domain}
+                             hover={hover} sel={sel} cursor={cursor} bands={bands}
+                             big={expanded === m} height={expanded === m ? 420 : 196}
+                             onHover={setHover} onSelect={setSel} onZoom={setDomain} />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
 
-      <div style={{ height: 14 }} />
-      <RecordTable records={records} />
+      {admin && (
+        <>
+          <div style={{ height: 14 }} />
+          <RecordTable records={records} />
+        </>
+      )}
 
       <p className="note" style={{ marginTop: 18 }}>
         Layers run as three independent processes. Killing one does not stop the others &mdash;
