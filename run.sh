@@ -79,6 +79,26 @@ shutdown() {
   echo
   echo "session: $GEOANCHOR_RUN_DIR"
   ls -1 "$GEOANCHOR_RUN_DIR" 2>/dev/null | sed 's/^/  /'
+
+  # Push this session to the shared logs repo, so a board's results are not
+  # stranded on the board. Runs AFTER the layers are down, because the output
+  # layer writes session.json on its way out and syncing before that would
+  # push a run with no export in it.
+  #
+  # Deliberately best-effort: no network, no logs repo, or a push that fails
+  # must never change the exit status of a flight. runs/ is the source of
+  # truth and the sync is a mirror -- the next successful sync picks it up.
+  if [ "${GEOANCHOR_SYNC_ON_EXIT:-1}" = "1" ] && [ -f "$HERE/scripts/sync_logs.sh" ]; then
+    if [ -f "$GEOANCHOR_RUN_DIR/session.json" ]; then
+      echo
+      echo "syncing to the logs repo (set GEOANCHOR_SYNC_ON_EXIT=0 to skip)"
+      bash "$HERE/scripts/sync_logs.sh" 2>&1 | sed 's/^/  /' \
+        || echo "  sync failed -- the run is safe in runs/, it will go up next time"
+    else
+      echo
+      echo "no session.json -- nothing to sync (the output layer did not flush)"
+    fi
+  fi
 }
 trap shutdown EXIT INT TERM
 
