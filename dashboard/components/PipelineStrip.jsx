@@ -21,7 +21,8 @@ const LAYERS = [
     line: 'Each fix is paired with the actual GPS taken at the same instant, scored, and written to the session file.' },
 ];
 
-export default function PipelineStrip({ layers, record, config = CFG, applying = null, paused = false }) {
+export default function PipelineStrip({ layers, record, config = CFG, applying = null,
+                                        paused = false, Panel }) {
   const r = record ? toRow(record, 0) : null;
   const k = (m) => (r ? band(m, r[m], BANDS) : 'none');
   const chips = {
@@ -33,34 +34,62 @@ export default function PipelineStrip({ layers, record, config = CFG, applying =
              ['To FC', config.loop_mode === 'closed' ? 'good' : 'pending']],
   };
 
+  // One rollup for the header, so the panel answers "is anything wrong" before
+  // you read three cards. A layer with no status has not reported at all,
+  // which is different from one reporting a bad number.
+  const live = LAYERS.filter((L) => layers?.[L.id]?.status?.ready);
+  const worst = Object.values(chips).flat()
+    .reduce((w, [, t]) => (t === 'bad' ? 'bad' : t === 'warn' && w !== 'bad' ? 'warn' : w), 'good');
+  const rollup = live.length < LAYERS.length
+    ? { tone: 'bad', text: `${LAYERS.length - live.length} layer not reporting` }
+    : worst === 'good' ? { tone: 'ok', text: 'all three layers nominal' }
+      : { tone: worst === 'bad' ? 'bad' : 'warn', text: `attention on this fix` };
+
+  const Wrap = Panel || (({ title, right, children }) => (
+    <div className="panel"><header><h2>{title}</h2><span className="spacer" />{right}</header>{children}</div>
+  ));
+
   return (
-    <div className="grid cols-3">
-      {LAYERS.map((L) => {
-        const busy = applying === L.id;
-        const st = layers?.[L.id]?.status;
-        return (
-          <div key={L.id} className="panel" style={{ padding: '16px 18px', opacity: busy ? 0.45 : 1, transition: 'opacity .18s' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span className={`dot ${busy ? '' : 'live'}`} />
-              <b style={{ fontSize: 19, textTransform: 'uppercase', letterSpacing: '.04em' }}>{L.name}</b>
-              <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 12.5, color: 'var(--ink-dim)' }}>
-                {busy ? 'applying…' : st?.rate_hz != null ? `${st.rate_hz.toFixed(2)} Hz` : '--'}
-              </span>
+    <Wrap
+      title="Pipeline"
+      info={<>Three independent processes on one ZeroMQ bus. Killing one does not stop the
+        others &mdash; its card simply stops reporting. Each named milestone below takes its
+        colour from the same thresholds the graphs use, so a red chip and a red stretch of
+        track are the same fix.</>}
+      right={(
+        <>
+          <span className="meta">this fix</span>
+          <span className={`badge ${rollup.tone}`}>{rollup.text}</span>
+        </>
+      )}
+    >
+      <div className="layers">
+        {LAYERS.map((L) => {
+          const busy = applying === L.id;
+          const st = layers?.[L.id]?.status;
+          const dead = !st?.ready;
+          return (
+            <div key={L.id} className={`layer ${busy || dead ? 'dead' : ''}`}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span className={`dot ${dead ? 'bad' : 'ok'}`} />
+                <span className="name">{L.name}</span>
+                <span style={{ flex: 1 }} />
+                <span className="rate">
+                  {busy ? 'applying…' : st?.rate_hz != null ? `${st.rate_hz.toFixed(2)} Hz` : '--'}
+                </span>
+              </div>
+              <p>{L.line}</p>
+              <div className="chips">
+                {chips[L.id].map(([label, tone]) => (
+                  <span key={label}
+                        className={`chip ${tone === 'pending' || tone === 'none' ? ''
+                          : tone === 'good' ? 'ok' : tone}`}>{label}</span>
+                ))}
+              </div>
             </div>
-            <p style={{ margin: '9px 0 13px', fontSize: 14.5, lineHeight: 1.5, color: 'var(--ink-dim)' }}>{L.line}</p>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-              {chips[L.id].map(([label, tone]) => (
-                <span key={label} style={{
-                  padding: '4px 9px', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.09em',
-                  border: `1px solid ${tone === 'pending' ? 'var(--line)' : bandColour(tone) + '88'}`,
-                  background: tone === 'pending' ? 'transparent' : bandColour(tone) + '22',
-                  color: tone === 'pending' ? 'var(--ink-faint)' : 'var(--ink)',
-                }}>{label}</span>
-              ))}
-            </div>
-          </div>
-        );
-      })}
-    </div>
+          );
+        })}
+      </div>
+    </Wrap>
   );
 }

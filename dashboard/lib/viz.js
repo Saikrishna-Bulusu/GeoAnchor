@@ -6,7 +6,10 @@
 
 export const COL = {
   good: '#3fb950', warn: '#d29922', bad: '#f85149',
-  actual: '#3fb950', predicted: '#4c9aff',
+  // `predicted` is the design's steel accent, not a generic UI blue -- it is
+  // the same #7fa6cc the buttons and the selected states use, so the predicted
+  // track reads as "ours" against the green of the actual GPS.
+  actual: '#3fb950', predicted: '#7fa6cc',
   ink: '#e6edf3', dim: '#93a1b1', faint: '#64748b',
   line: '#26303d', panel: '#151b24', panel2: '#1b232e', bg: '#0d1117',
   steel: '#7fa6cc',

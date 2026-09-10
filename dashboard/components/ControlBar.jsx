@@ -19,9 +19,15 @@ const LOOPS = [
   { id: 'closed', label: 'Closed — send predicted GPS' },
 ];
 
-export default function ControlBar({ layers, methods, disabled }) {
+export default function ControlBar({ layers, methods, disabled, loopMode, Panel }) {
   const [busy, setBusy] = useState(null);
   const [err, setErr] = useState(null);
+
+  // Two of these controls ask before they apply, and the design marks them
+  // "confirms" on the label so it is visible BEFORE the click rather than
+  // after. Feed interrupts the pipeline; loop mode decides what reaches the
+  // vehicle. Everything else is a live setting and applies straight away.
+  const [pending, setPending] = useState(null);
 
   const dl = layers?.data?.status?.config || {};
   const pl = layers?.processing?.status?.config || {};
@@ -51,24 +57,47 @@ export default function ControlBar({ layers, methods, disabled }) {
     : ['orb', 'sift', 'akaze', 'xfeat_mnn', 'xfeat_lg',
        'edgepoint2_t32', 'edgepoint2_s32', 'edgepoint2_s64'];
 
+  const loop = loopMode || ol.loop_mode || 'off';
+  const Wrap = Panel || (({ title, right, children }) => (
+    <div className="panel"><header><h2>{title}</h2><span className="spacer" />{right}</header>{children}</div>
+  ));
+
   return (
-    <div className="panel">
-      <header>
-        <h2>Configuration</h2>
-        {err && <span className="note" style={{ marginLeft: 'auto', color: 'var(--bad)' }}>{err}</span>}
-      </header>
+    <Wrap
+      title="Configuration"
+      info={<>Each change sends one control message to the layer that owns it; nothing is
+        written back to <code>configs/system.yaml</code>, so a restart returns to the
+        file&rsquo;s known state. Feed and loop mode ask before they apply &mdash; one
+        interrupts the pipeline, the other decides what reaches the vehicle.</>}
+      right={(
+        <>
+          {err && <span className="meta" style={{ color: 'var(--bad)' }}>{err}</span>}
+          <span className={`badge ${loop === 'closed' ? 'bad' : loop === 'open' ? 'accent' : ''}`}>
+            loop {loop}
+          </span>
+        </>
+      )}
+    >
       <div className="body">
         <div className="controls">
           <div className="field">
-            <label htmlFor="feed">Feed</label>
+            <label className="label" htmlFor="feed">
+              Feed<span className="badge">confirms</span>
+            </label>
             <select id="feed" disabled={disabled || busy === 'data'} value={dl.feed?.kind || 'file'}
-                    onChange={(e) => send('data', { cmd: 'reopen_feed', feed: { type: e.target.value } })}>
+                    onChange={(e) => setPending({
+                      kind: 'feed', value: e.target.value,
+                      text: `Reopen the feed as "${FEEDS.find((f) => f.id === e.target.value)?.label}". `
+                          + 'The data layer closes the current source and re-opens; fixes stop '
+                          + 'until it is live again.',
+                      apply: () => send('data', { cmd: 'reopen_feed', feed: { type: e.target.value } }),
+                    })}>
               {FEEDS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
             </select>
           </div>
 
           <div className="field">
-            <label htmlFor="method">Method</label>
+            <label className="label" htmlFor="method">Method</label>
             <select id="method" disabled={disabled || busy === 'processing'} value={pl.method || 'xfeat_mnn'}
                     onChange={async (e) => {
                       // The reference store holds descriptors from one
@@ -98,7 +127,7 @@ export default function ControlBar({ layers, methods, disabled }) {
           </div>
 
           <div className="field">
-            <label htmlFor="fw">Flight firmware</label>
+            <label className="label" htmlFor="fw">Flight firmware</label>
             <select id="fw" disabled={disabled} value={ol.fc?.firmware || 'ardupilot'}
                     onChange={(e) => send('output', { cmd: 'set', path: 'output_layer.fc.firmware', value: e.target.value })}>
               {FIRMWARES.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
@@ -106,7 +135,7 @@ export default function ControlBar({ layers, methods, disabled }) {
           </div>
 
           <div className="field">
-            <label htmlFor="fcu">Flight computer</label>
+            <label className="label" htmlFor="fcu">Flight computer</label>
             <select id="fcu" disabled={disabled} value={ol.fc?.controller || 'pixhawk6c'}
                     onChange={(e) => send('output', { cmd: 'set', path: 'output_layer.fc.controller', value: e.target.value })}>
               {CONTROLLERS.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -114,15 +143,31 @@ export default function ControlBar({ layers, methods, disabled }) {
           </div>
 
           <div className="field">
-            <label htmlFor="loop">Loop mode</label>
-            <select id="loop" disabled={disabled || busy === 'output'} value={ol.loop_mode || 'open'}
-                    onChange={(e) => send('output', { cmd: 'set_loop_mode', mode: e.target.value })}>
+            <label className="label" htmlFor="loop">
+              Loop mode<span className="badge">confirms</span>
+            </label>
+            <select id="loop" disabled={disabled || busy === 'output'} value={loop}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setPending({
+                        kind: 'loop', value: v,
+                        text: v === 'closed'
+                          ? 'Closed loop writes the PREDICTED position to the flight controller. '
+                            + 'It stays gated per fix on the inlier floor, the 100 m altitude cap '
+                            + 'and the absence of live device errors in any layer.'
+                          : v === 'open'
+                            ? 'Open loop sends the ACTUAL GPS over the ExternalNav path. The '
+                              + 'position cannot mislead the filter, so this tests the plumbing.'
+                            : 'Nothing will be sent to the vehicle.',
+                        apply: () => send('output', { cmd: 'set_loop_mode', mode: v }),
+                      });
+                    }}>
               {LOOPS.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
             </select>
           </div>
 
           <div className="field">
-            <label htmlFor="loss">Loss</label>
+            <label className="label" htmlFor="loss">Loss</label>
             <select id="loss" disabled={disabled} value={ol.loss || 'nll'}
                     onChange={(e) => send('output', { cmd: 'set', path: 'output_layer.loss', value: e.target.value })}>
               <option value="nll">NLL (calibration)</option>
@@ -131,14 +176,24 @@ export default function ControlBar({ layers, methods, disabled }) {
           </div>
         </div>
 
-        <div className="btn-row" style={{ marginTop: 14 }}>
+        {pending && (
+          <div className="confirm">
+            <span className="kicker">Confirm</span>
+            <p>{pending.text}</p>
+            <button className="btn amber"
+                    onClick={() => { pending.apply(); setPending(null); }}>Apply</button>
+            <button className="btn" onClick={() => setPending(null)}>Cancel</button>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 13 }}>
           <button className="btn" disabled={disabled} onClick={() => send('data', { cmd: 'pause' })}>Pause feed</button>
           <button className="btn" disabled={disabled} onClick={() => send('data', { cmd: 'resume' })}>Resume</button>
           <button className="btn" disabled={disabled} onClick={() => send('processing', { cmd: 'reset_prior' })}>
             Reset prior
           </button>
           <button className="btn" disabled={disabled} onClick={() => send('output', { cmd: 'flush' })}>Flush session</button>
-          <span className="spacer" />
+          <span style={{ flex: 1 }} />
           <button className="btn danger" disabled={disabled}
                   onClick={() => { ['data', 'processing', 'output'].forEach((l) => send(l, { cmd: 'stop' })); }}>
             Stop all layers
@@ -153,7 +208,7 @@ export default function ControlBar({ layers, methods, disabled }) {
           </p>
         )}
 
-        {ol.loop_mode === 'closed' && (
+        {loop === 'closed' && (
           <p className="note" style={{ marginTop: 12, color: 'var(--warn)' }}>
             Closed loop. The predicted position is being written to the flight controller.
             It is still gated per fix on the inlier floor, the 100 m altitude cap and the
@@ -161,6 +216,6 @@ export default function ControlBar({ layers, methods, disabled }) {
           </p>
         )}
       </div>
-    </div>
+    </Wrap>
   );
 }

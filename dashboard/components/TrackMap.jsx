@@ -16,12 +16,21 @@ import { BANDS, toRows } from '@/lib/thresholds';
 export default function TrackMap({
   map, records, basemap, metric = 'ms', cursor = null, hover = null, sel = null,
   follow = false, show, bands = BANDS, onHover, onPick, className,
+  view: viewProp, onView, canvasRef,
 }) {
   const canvas = useRef(null);
   const tf = useRef(null);
   const pan = useRef(null);
   const [img, setImg] = useState(null);
-  const [view, setView] = useState({ cx: 0.5, cy: 0.5, zoom: 1 });
+
+  // Controlled or uncontrolled, the usual React pattern. The page needs the
+  // view to drive the zoom and Fit-flight buttons in the panel header, but
+  // `<TrackMap map records basemap />` on its own must still pan and zoom, so
+  // the internal state stays as the fallback rather than being removed.
+  const [viewOwn, setViewOwn] = useState({ cx: 0.5, cy: 0.5, zoom: 1 });
+  const view = viewProp || viewOwn;
+  const setView = onView || setViewOwn;
+
   const rows = toRows(records);
   const at = cursor == null ? rows.length - 1 : cursor;
 
@@ -72,7 +81,7 @@ export default function TrackMap({
   return (
     <div className={className} style={{ position: 'relative', width: '100%', height: '100%' }}>
       <canvas
-        ref={canvas}
+        ref={(el) => { canvas.current = el; if (canvasRef) canvasRef.current = el; }}
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: 'crosshair', touchAction: 'none' }}
         onWheel={(e) => { e.preventDefault(); setView((v) => ({ ...v, zoom: Math.max(0.6, Math.min(14, v.zoom * (e.deltaY < 0 ? 1.16 : 1 / 1.16))) })); }}
         onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); pan.current = { x: e.clientX, y: e.clientY, view, moved: false }; }}

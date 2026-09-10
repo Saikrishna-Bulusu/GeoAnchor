@@ -1,0 +1,26 @@
+Classical baselines on real satellite reference -- AnyVisLoc env80
+326 frames (Scene_09 n=134, Scene_10 n=192), cold start, satellite basemap.
+Energy and latency are Pi 5 pinned, 1 tile / 2048 ref keypoints.
+
+A fix is USABLE if it is accepted at a gate and lands inside 20 m. A
+matcher that returns confident fixes on the wrong building is not cheap,
+it is broken -- so joules per FIX is the wrong denominator.
+
+matcher       plausible  usable  usable%   J/fix  J/usable fix   p95 ms
+-----------------------------------------------------------------------
+orb                   5       0    0.0%    0.63      infinite     67.9
+sift                  8       0    0.0%    2.32      infinite    183.7
+akaze                 9       0    0.0%    2.91      infinite     81.3
+xfeat_mnn            98      39   12.0%    4.51         37.70    309.7
+xfeat_lg             83      35   10.7%   16.05        149.49   3638.0
+
+ORB is 7.2x cheaper per fix than xfeat_mnn and returns ZERO usable fixes
+in 326 frames -- 0/192 plausible on Scene_10, 5/134 on Scene_09, never
+reaching a 5% accept rate at any gate. SIFT's one qualifying gate has a
+MEDIAN error of 126.6 m. AKAZE manages 9 plausible solves out of 326.
+
+So the 'ORB is 25x cheaper, maybe it is enough' hypothesis is dead. The
+energy saving is real and it buys nothing, because the denominator is
+zero. Report this as a negative result -- it is the cleanest argument in
+the project for why a learned detector is necessary rather than merely
+nicer, and it costs no extra experiment to make.
