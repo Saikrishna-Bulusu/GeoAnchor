@@ -212,3 +212,73 @@ python scripts/fetch_historical_tile.py --bbox 151.19,-33.89,151.21,-33.87 \
 NSW Spatial Services imagery is **CC BY 4.0**. Attribute as: *NSW Department of
 Customer Service, Sydney 1943 imagery.* The fetch script writes that string into
 the GeoTIFF's tags so it travels with the file.
+
+---
+
+## The two routes that need you, not a script
+
+Both were checked on 10 Sept 2026 and both are real. Neither can be automated
+from here, because both need an account or an application in your name.
+
+### 1. NSW Historical Imagery Viewer — free, CC BY, back to the 1930s
+
+The **Spatial Collaboration Portal** hosts a Historical Imagery Viewer that
+searches the whole library and lets you **download a 600 dpi scan of any chosen
+frame free of charge**. This is the portal that returns `Token Required` to an
+anonymous fetch, which is why the automated route stopped at `sixmaps`.
+
+- Viewer: <https://portal.spatial.nsw.gov.au/client/services?id=f7c215b873864d44bccddda8075238cb>
+- Custom orders: <https://www.spatial.nsw.gov.au/products_and_services/aerial_and_historical_imagery/historical_imagery_request>
+
+NSW has flown aerial photography continuously **since 1947**, roughly every
+five years in the east. So the epochs the `LPI_Imagery_Best` footprint names but
+will not render — 2013 and 2018 over the CBD — are obtainable here, **and they
+are CC BY**, which Wayback is not.
+
+**Why bother, given the Wayback curve already answers the question.** Two
+reasons. The Wayback pixels cannot be redistributed, so no figure built from
+them can go in a paper; NSW's can. And a scanned frame has a real capture date
+and real metadata, where a Wayback release date is when Esri *published*, which
+is not when the aircraft flew — a systematic offset of unknown size sitting
+under every gap in the curve.
+
+Ask for: **Sydney CBD, 2013 and 2018**, to pair against `ref_tile.tif`.
+
+### 2. Nearmap via AURIN — free for Australian academics, by application
+
+**AURIN** has negotiated Nearmap access for Australian researchers: about
+**250 km² per city** over Melbourne, Sydney, Brisbane and Perth, for a single
+time period, by expression of interest.
+
+- <https://aurin.org.au/nearmap/>
+
+Separately, many Australian universities carry an institutional Nearmap
+subscription through the library, reached via OneSearch with a university email.
+**Check whether UTS already has one before applying to AURIN** — if it does,
+this is a login rather than a project.
+
+Nearmap's own product is a genuine dated time series at ~5–7 cm, which is finer
+than anything else here. The catch is the AURIN offer is "a single time period",
+so it gives one more epoch rather than a series unless the library subscription
+covers it.
+
+### Ruled out with numbers, not assumption
+
+`rho = (altitude / fx_px) / map_gsd` — reference pixels per frame pixel, using
+the measured `fx_px = 1421.48`. `step17` targets 0.15; below about 0.05 there is
+no shared detail left to match on.
+
+| source | m/px | rho @ 50 m | rho @ 100 m | |
+|---|---|---|---|---|
+| NSW 10 cm | 0.100 | 0.352 | 0.703 | workable |
+| NSW LOD20 / `ref_tile.tif` | 0.124 | 0.284 | 0.568 | workable |
+| Wayback z19 | 0.248 | 0.142 | 0.284 | workable |
+| NSW 50 cm statewide | 0.500 | 0.070 | 0.141 | marginal |
+| **Sentinel-2** | 10.0 | **0.004** | 0.007 | **not usable** |
+| **Landsat 8/9** | 30.0 | **0.001** | 0.002 | **not usable** |
+
+Sentinel-2 is free, open, and has a 5-day revisit going back a decade, which
+makes it the obvious candidate for a time series. It is **25× below the marginal
+threshold** at 50 m AGL. One frame pixel covers 0.004 of a reference pixel;
+there is nothing to match. Landsat is worse. Neither is a near miss and no
+matcher choice changes it — this is geometry.
