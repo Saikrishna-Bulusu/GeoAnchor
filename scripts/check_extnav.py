@@ -97,23 +97,45 @@ def main() -> int:
           f"autopilot {hb.autopilot} type {hb.type}")
 
     print("\n2/4  parameters")
-    conn.mav.param_request_list_send(conn.target_system, conn.target_component)
-    got, deadline = {}, time.time() + args.timeout
-    while time.time() < deadline and len(got) < len(WANT):
-        m = conn.recv_match(type="PARAM_VALUE", blocking=True, timeout=1)
-        if m and m.param_id in WANT:
-            got[m.param_id] = float(m.param_value)
+    # Ask for each parameter BY NAME rather than streaming the whole table.
+    #
+    # This used to send param_request_list, which streams every parameter the
+    # vehicle has -- about 1200 on ArduCopter -- and then picked ours out of the
+    # flood. Against real SITL the VISO_* entries did not arrive inside a 20 s
+    # timeout, and the script reported them "absent on this firmware" when a
+    # targeted read returns all of them in milliseconds.
+    #
+    # That is the worst possible failure for this script, because "absent on
+    # this firmware" is the exact verdict that condemns a board: it is how you
+    # tell an F405 with visual odometry compiled out from an F7 that has it. A
+    # check that says "absent" when it means "slow" cannot make that call.
+    #
+    # A targeted read is also what makes the distinction real. A parameter that
+    # exists answers immediately; one that does not is never answered no matter
+    # how long you wait. Three rounds, so a dropped UDP packet is not a verdict.
+    got = {}
+    for attempt in range(3):
+        missing = [n for n in WANT if n not in got]
+        if not missing:
+            break
+        for name in missing:
+            conn.mav.param_request_read_send(
+                conn.target_system, conn.target_component, name.encode(), -1)
+        deadline = time.time() + max(3.0, args.timeout / 3)
+        while time.time() < deadline and len(got) < len(WANT):
+            m = conn.recv_match(type="PARAM_VALUE", blocking=True, timeout=1)
+            if m and m.param_id in WANT:
+                got[m.param_id] = float(m.param_value)
+
     problems, unknown = 0, 0
     for name, (why, ok) in WANT.items():
         if name not in got:
-            # NOT harmless. param_request_list streams every parameter on the
-            # vehicle, and over a serial link the ten we care about may simply
-            # not have arrived inside the timeout. "Did not arrive" and "does
-            # not exist" are indistinguishable from here, so this counts rather
-            # than shrugging: reporting success for a parameter never seen is
-            # how a misconfigured autopilot passes its own pre-flight check.
-            print(f"     ??   {name:16s} not reported -- absent on this firmware, or the "
-                  "parameter stream did not finish in time")
+            # Now this means what it says. Three targeted reads went unanswered,
+            # so the parameter is not in this firmware -- which for VISO_* means
+            # visual odometry was compiled out and no configuration adds it
+            # back. See docs/FC_AND_HITL_PLAN.md for the flash-size gate.
+            print(f"     ??   {name:16s} ABSENT -- three targeted reads unanswered. "
+                  "Not compiled into this firmware.")
             unknown += 1
             continue
         v = got[name]
@@ -124,10 +146,26 @@ def main() -> int:
         print(f"\n     {problems} parameter(s) wrong. Set them and reboot the autopilot "
               "before going further -- an ExternalNav fix is ignored silently otherwise.")
     if unknown:
-        print(f"     {unknown} parameter(s) never reported. Re-run with a longer --timeout "
-              "before treating this as a pass.")
+        print(f"\n     {unknown} parameter(s) ABSENT from this firmware.")
+        if any(n.startswith("VISO_") for n in WANT if n not in got):
+            print("     VISO_* missing means AP_VisualOdom was not compiled in. ArduPilot "
+                  "gates it on\n     HAL_PROGRAM_SIZE_LIMIT_KB > 1024, so a 1 MB board "
+                  "(the SpeedyBee F405 V3 is one)\n     cannot do closed-loop ExternalNav "
+                  "at all. FC->companion telemetry still works.\n     "
+                  "See docs/FC_AND_HITL_PLAN.md.")
 
     print("\n3/4  waiting for a position to echo back")
+    # ASK for the stream first. ArduPilot sends only what a GCS has requested,
+    # so on a fresh link with no GCS attached nothing arrives but the heartbeat
+    # -- and this step then reported "the EKF has no origin yet" against a
+    # vehicle with a 10-satellite RTK-fixed lock and a perfectly good position.
+    # docs/FC_AND_HITL_PLAN.md has said "ArduPilot only streams what a GCS has
+    # requested" since it was written; the script simply did not do it.
+    for stream in (mavutil.mavlink.MAV_DATA_STREAM_POSITION,
+                   mavutil.mavlink.MAV_DATA_STREAM_EXTENDED_STATUS):
+        conn.mav.request_data_stream_send(
+            conn.target_system, conn.target_component, stream, 5, 1)
+
     pos = None
     deadline = time.time() + args.timeout
     while time.time() < deadline:
@@ -136,8 +174,8 @@ def main() -> int:
             pos = (m.lat / 1e7, m.lon / 1e7)
             break
     if pos is None:
-        print("     no GLOBAL_POSITION_INT with a valid fix. The EKF has no origin yet;")
-        print("     arm in SITL or wait for GPS lock, then re-run.")
+        print("     no GLOBAL_POSITION_INT with a valid fix, and the stream was requested.")
+        print("     The EKF has no origin yet; arm in SITL or wait for GPS lock, then re-run.")
         return 1
     print(f"     {pos[0]:.7f}, {pos[1]:.7f}")
 

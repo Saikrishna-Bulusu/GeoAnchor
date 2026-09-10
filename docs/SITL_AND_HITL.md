@@ -15,6 +15,97 @@ class of bug from the next.
 
 ---
 
+## Verified end to end, 10 Sept 2026
+
+Everything in stage 1 below was run against a real ArduCopter SITL build on the
+Legion, not written from the source. What happened:
+
+```
+ArduPilot master, shallow clone, ./waf configure --board sitl && ./waf copter
+  -> build/sitl/bin/arducopter, 5.8 MB, ~12 min
+12/12 ExternalNav parameters present        <- the contrast that condemns the F405 V3
+check_extnav.py                             4/4 pass
+sitl_openloop.py --seconds 60               92 records, 2 fixes sent, 0 device errors
+EKF_STATUS_REPORT posTestRatio              0.0052        <- accepted, gate is 1.0
+```
+
+**The fixes were accepted.** `posTestRatio` of 0.0052 is three orders under the
+5-sigma rejection gate, and no `OLDE-*` was raised, so the whole write path —
+frame, covariance, origin, timestamp — is correct against a real EKF3.
+
+### The thing that surprised me, and it is the important one
+
+After the 60-second session ended, `EKF_STATUS_REPORT` read:
+
+```
+pos_horiz_abs   no
+pos_horiz_rel   no
+pos_vert_abs    yes
+attitude        yes
+```
+
+**The vehicle had no horizontal position at all.** That is correct behaviour and
+it is the sharpest illustration of what `EK3_SRC1_POSXY = 6` means: the EKF is
+now depending on *this pipeline* for horizontal position, and when the pipeline
+stops feeding it, position is gone within the 7-second `posTimeout`. GPS is no
+longer the fallback, because you told it not to be.
+
+So the parameter set is not a configuration detail, it is a commitment. Do not
+set `EK3_SRC1_POSXY = 6` on a vehicle you intend to fly until the pipeline is
+producing fixes continuously and you have watched it survive a dropout.
+
+### Two bugs in our own tooling, found by running it
+
+Both made the script report a *wrong verdict*, not an error, which is why they
+had survived being written down as correct.
+
+- **`check_extnav.py` reported `VISO_*` as "absent on this firmware"** against a
+  SITL build that has all of them. It sent `param_request_list`, which streams
+  all ~1200 parameters, and the VISO entries did not arrive inside the timeout.
+  That is the worst possible failure for this script: "absent on this firmware"
+  is exactly the verdict that condemns a board, and it is how you tell an F405
+  with visual odometry compiled out from an F7 that has it. It now reads each
+  parameter **by name**, three times — a parameter that exists answers in
+  milliseconds, one that does not is never answered — so absent now means absent.
+
+- **It waited for `GLOBAL_POSITION_INT` without requesting the stream.**
+  ArduPilot sends only what a GCS has asked for, so step 3 reported "the EKF has
+  no origin yet" against a vehicle with a 10-satellite RTK-fixed lock and a
+  perfectly good position. `FC_AND_HITL_PLAN.md` has said "ArduPilot only
+  streams what a GCS has requested" since it was written; the script did not do
+  it. It requests the stream now.
+
+**`EKF_STATUS_REPORT` is not in `MAV_DATA_STREAM_EXTENDED_STATUS`** on current
+ArduPilot either. Ask for it explicitly:
+
+```bash
+python -c "
+from pymavlink import mavutil
+m = mavutil.mavlink_connection('udpin:127.0.0.1:14550'); m.wait_heartbeat()
+m.mav.command_long_send(m.target_system, m.target_component,
+    mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL, 0,
+    mavutil.mavlink.MAVLINK_MSG_ID_EKF_STATUS_REPORT, 200000, 0,0,0,0,0)
+while True:
+    e = m.recv_match(type='EKF_STATUS_REPORT', blocking=True)
+    print(f'posTestRatio {e.pos_horiz_variance:.4f}  flags 0x{e.flags:04x}')
+"
+```
+
+### Re-verified against the source, not the notes
+
+The clone made it cheap to re-check the constants this project's findings rest
+on. All three hold, and one line number has drifted:
+
+| claim | where | status |
+|---|---|---|
+| `HAL_VISUALODOM_ENABLED` is `HAL_PROGRAM_SIZE_LIMIT_KB > 1024` | `AP_VisualOdom_config.h:7` | confirmed |
+| `speedybeef4v3` is `FLASH_SIZE_KB 1024` | `hwdef.dat:16` | confirmed — so `1024 > 1024` is false |
+| wrong `frame_id` returns in silence | `GCS_Common.cpp:4097` | confirmed, bare `return`, no warning |
+| `posErr = sqrtf(cov[0]+cov[6]+cov[11])`, only `cov[0]` NaN-checked | `GCS_Common.cpp:4106` | confirmed |
+| delay compensation clamped to 250 ms | `AP_NavEKF3_core.cpp:86` | confirmed — **notes say :83, upstream moved** |
+
+---
+
 ## Why SITL first, always
 
 SITL builds ArduPilot with **nothing trimmed**. Every parameter exists, every
