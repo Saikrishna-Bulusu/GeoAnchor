@@ -405,8 +405,12 @@ export default function Page() {
                       metric={metric} cursor={cursor} hover={hover} sel={sel} bands={bands}
                       onHover={setHover} onPick={setCursor} follow={follow}
                       view={view} onView={setView} canvasRef={mapCanvas}
+                      /* `error` was missing from this object, so the ERROR
+                         toggle above the map set state that nothing read and
+                         the whiskers never drew. All four keys go through. */
                       show={{ actual: true, predicted: show.predicted,
-                              sigma: show.sigma, rejects: show.rejects }} />
+                              error: show.error, sigma: show.sigma,
+                              rejects: show.rejects }} />
 
             {here && (
               <div className="overlay tl">

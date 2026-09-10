@@ -195,12 +195,29 @@ export function drawMap(cv, o) {
   const upto = o.live === false ? recs : recs.slice(0, (o.cursor ?? recs.length - 1) + 1);
   const show = o.show || {};
 
-  // predicted track, thin and dashed under the coloured one
+  // predicted track, thin and dashed under the coloured one.
+  //
+  // A rejected fix has NO predicted position -- 533 of 2515 in a typical
+  // replay, and they fall mid-track, not only at the start. The old loop chose
+  // moveTo vs lineTo on the array index `i` rather than on whether a point had
+  // actually been drawn yet, and skipped the empty ones with a bare `return`.
+  // So the path ran straight from the fix before a gap to the fix after it: a
+  // long dashed line across the map through positions the pipeline never
+  // predicted. Break the subpath at every gap instead.
   if (show.predicted && upto.length > 1) {
     g.save(); g.setLineDash([5 * dpr, 4 * dpr]);
-    g.strokeStyle = 'rgba(76,154,255,0.75)'; g.lineWidth = 1.4 * dpr;
+    // COL.predicted, not a second copy of it. This was hardcoded to the old
+    // #4c9aff and so kept drawing the bright blue after the palette moved to
+    // the design's steel -- the one line on the map that ignored the theme.
+    g.strokeStyle = COL.predicted; g.globalAlpha = 0.75;
+    g.lineWidth = 1.4 * dpr;
     g.beginPath();
-    upto.forEach((r, i) => { const p = Pp(r); if (!p) return; i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y); });
+    let open = false;
+    for (const r of upto) {
+      const p = Pp(r);
+      if (!p) { open = false; continue; }
+      if (open) g.lineTo(p.x, p.y); else { g.moveTo(p.x, p.y); open = true; }
+    }
     g.stroke(); g.restore();
   }
 
