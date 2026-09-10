@@ -55,7 +55,63 @@ class Method:
         raise NotImplementedError
 
     def describe(self) -> dict:
-        return {"name": self.name, "kind": self.kind, "learned": self.learned}
+        return {"name": self.name, "kind": self.kind, "learned": self.learned,
+                "label": label(self.name), "blurb": blurb(self.name)}
+
+
+# --------------------------------------------------------------------------
+# What a human should see. The keys below are NOT renamed, and must not be.
+#
+# A method name is load-bearing in three places that outlive any one run:
+# the feature store id hashes it in (`ref_tile__xfeat_mnn__<hash>`), every
+# session.json record carries `"method": "xfeat_mnn"`, and the parent repo's
+# results/ tables are keyed on it. Renaming `xfeat_mnn` to something friendly
+# would invalidate every built store on every board and make every exported
+# session unreadable, to change a string on a dropdown.
+#
+# So the identifier stays and the label is separate. `mnn` is mutual nearest
+# neighbour, `lg` is LighterGlue, `t`/`s` are EdgePoint2's tiny and small
+# networks and the number is the descriptor width -- all of which are obvious
+# once you know and opaque until you do.
+# --------------------------------------------------------------------------
+DISPLAY = {
+    "orb":   ("ORB",   "Classical. Fastest thing here and it runs on any board. "
+                       "Returned zero geometrically plausible fixes against real "
+                       "satellite reference -- fast is not the same as usable."),
+    "sift":  ("SIFT",  "Classical. Beats XFeat for speed on ARM, which surprises "
+                       "people. Still no plausible fixes on Scene_10."),
+    "akaze": ("AKAZE", "Classical. 6 plausible fixes in 192 frames on Scene_10, "
+                       "all inside 5 m. The one classical method that is not "
+                       "simply broken on real reference."),
+    "xfeat_mnn": ("XFeat + Nearest-Neighbour",
+                  "Learned detector, plain descriptor matching. The general-"
+                  "purpose default. Wants an inlier gate around 10."),
+    "xfeat_lg":  ("XFeat + LighterGlue",
+                  "Learned detector AND learned matcher. Most accurate on paper "
+                  "and unusable on a CPU board: 2-3.6 s per fix, and 9x SLOWER on "
+                  "the frames it fails than on the ones it solves."),
+    "edgepoint2_t32": ("EdgePoint2 Tiny (32-D)",
+                       "Smallest network, narrow descriptor. Collapses on the "
+                       "hard scene -- 0.8% accept where the 64-D gets 5.2%."),
+    "edgepoint2_s32": ("EdgePoint2 Small (32-D)",
+                       "Narrow descriptor buys no speed here and costs accuracy. "
+                       "Measured for the comparison, not recommended."),
+    "edgepoint2_s64": ("EdgePoint2 Small (64-D)",
+                       "Faster than XFeat on both scenes and its worst error is "
+                       "8.4 m where XFeat's is 187 m. Wants a LOWER inlier gate "
+                       "(8, not 10) -- using XFeat's gate throws away a third of "
+                       "its fixes."),
+}
+
+
+def label(name: str) -> str:
+    """Human-readable name. Falls back to the identifier for anything new."""
+    return DISPLAY.get(name, (name, ""))[0]
+
+
+def blurb(name: str) -> str:
+    """One-paragraph 'should I pick this', from measured numbers only."""
+    return DISPLAY.get(name, (name, ""))[1]
 
 
 # --------------------------------------------------------------------------
@@ -505,7 +561,8 @@ def survey(**kw) -> dict:
             ok, why = build(name, **kw).available()
         except Exception as exc:
             ok, why = False, f"{type(exc).__name__}: {exc}"
-        out[name] = {"available": ok, "reason": why}
+        out[name] = {"available": ok, "reason": why,
+                     "label": label(name), "blurb": blurb(name)}
     return out
 
 

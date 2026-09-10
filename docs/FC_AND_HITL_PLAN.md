@@ -22,21 +22,54 @@ follow:
 
 - **PX4 is not an option on it.** PX4 dropped F4 support; there is no
   maintained target. This is not a preference, it is the absence of firmware.
-- **ArduPilot on F405 is flash-constrained.** ArduPilot has F405 targets, but
-  at 1 MB the build strips features to fit, and what gets stripped varies by
-  target and release. **Whether EKF3 + ExternalNav survives the trim on this
-  specific board is the first thing to check, and it is not safe to assume.**
+- **ArduPilot on F405 is flash-constrained**, and this one loses the feature.
+  **Checked against ArduPilot source on 10 Sept 2026, not assumed.**
 
-Check it before buying into the plan:
+  `AP_VisualOdom_config.h`:
+
+  ```c
+  #define HAL_VISUALODOM_ENABLED HAL_PROGRAM_SIZE_LIMIT_KB > 1024
+  ```
+
+  `speedybeef4v3/hwdef.dat`:
+
+  ```
+  FLASH_SIZE_KB 1024
+  ```
+
+  `1024 > 1024` is **false**. Visual odometry is compiled out of the stock
+  speedybeef4v3 firmware. Neither `minimize_fpv_osd.inc` nor
+  `minimize_common.inc` disables it by name — the flash-size gate does it.
+
+  So there will be no `VISO_*` parameters at all, and `EK3_SRC1_POSXY = 6` has
+  nothing to select. **No amount of configuration adds it back.**
+
+Confirm on your own board, because a firmware revision could change it:
 
 ```bash
 python scripts/check_extnav.py --port /dev/ttyACM0
 ```
 
 It verifies `VISO_TYPE`, `VISO_DELAY_MS`, `EK3_SRC1_POSXY=6`, `AHRS_EKF_TYPE`
-and the rest. **If `VISO_*` parameters do not exist, ExternalNav was not
-compiled in** and this board cannot be the closed-loop target — no amount of
-configuration adds it back. That is a firmware limit, not a wiring fault.
+and the rest. Missing `VISO_*` is the expected result here, and it is a firmware
+limit rather than a wiring fault.
+
+### What that does and does not cost you
+
+|  | works? |
+|---|---|
+| FC → Pi: attitude, altitude, GPS | **yes** — plain telemetry, needs no VISO |
+| Pi → FC: our position fix | **no** — the feature is not in the firmware |
+
+You already own the board, so the question is what it can still prove, and the
+answer is most of the chain: a real flight controller feeding a real companion
+computer, the pipeline matching against a real map, producing a real position
+with a real covariance, live on the dashboard. Everything except the last hop.
+
+Prove the last hop in SITL, where the firmware is complete — see
+[`SITL_AND_HITL.md`](SITL_AND_HITL.md). If closed loop on real hardware ever
+becomes the goal, it needs an F7 or H7 board with 2 MB of flash. NGPS ran a
+Cube Orange Plus.
 
 ### So treat the F405 V3 as a bench target, not the flight controller
 
@@ -44,9 +77,6 @@ Its job in this project is to answer one question — *does the Pi↔FC MAVLink
 link work?* — using real hardware, cheaply. Everything about covariance,
 latency budgets and EKF3 acceptance should be developed against **SITL**, where
 the firmware is a full build with nothing trimmed.
-
-If closed-loop on real hardware becomes the goal, budget for an F7/H7 board
-(2 MB flash). NGPS ran a Cube Orange Plus.
 
 ---
 

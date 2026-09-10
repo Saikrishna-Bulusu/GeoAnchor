@@ -1,0 +1,50 @@
+[
+  {
+    "method": "edgepoint2_s64",
+    "label": "EdgePoint2 Small (64-D)",
+    "query": "/home/sai/GeoAnchor/geoanchor-rt/data/sydney/ref_tile.tif",
+    "reference": "/home/sai/GeoAnchor/geoanchor-rt/data/sydney/ref_tile.tif",
+    "query_gsd_m": 0.1238,
+    "reference_gsd_m": 0.1238,
+    "frames": 12,
+    "inliers_median": 22,
+    "inliers_max": 44,
+    "solved": 8,
+    "plausible": 8,
+    "median_error_m": 0.018,
+    "p90_error_m": 0.024,
+    "max_error_m": 0.024
+  },
+  {
+    "method": "xfeat_mnn",
+    "label": "XFeat + Nearest-Neighbour",
+    "query": "/home/sai/GeoAnchor/geoanchor-rt/data/sydney/ref_tile.tif",
+    "reference": "/home/sai/GeoAnchor/geoanchor-rt/data/sydney/ref_tile.tif",
+    "query_gsd_m": 0.1238,
+    "reference_gsd_m": 0.1238,
+    "frames": 12,
+    "inliers_median": 17,
+    "inliers_max": 43,
+    "solved": 12,
+    "plausible": 12,
+    "median_error_m": 0.058,
+    "p90_error_m": 0.088,
+    "max_error_m": 0.133
+  },
+  {
+    "method": "sift",
+    "label": "SIFT",
+    "query": "/home/sai/GeoAnchor/geoanchor-rt/data/sydney/ref_tile.tif",
+    "reference": "/home/sai/GeoAnchor/geoanchor-rt/data/sydney/ref_tile.tif",
+    "query_gsd_m": 0.1238,
+    "reference_gsd_m": 0.1238,
+    "frames": 12,
+    "inliers_median": 8,
+    "inliers_max": 43,
+    "solved": 7,
+    "plausible": 7,
+    "median_error_m": 17.637,
+    "p90_error_m": 105.592,
+    "max_error_m": 105.592
+  }
+]

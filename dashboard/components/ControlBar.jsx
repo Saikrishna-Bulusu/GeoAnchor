@@ -34,10 +34,22 @@ export default function ControlBar({ layers, methods, disabled }) {
     finally { setBusy(null); }
   };
 
-  const available = methods || pl.methods_available || {};
-  const methodNames = Object.keys(available).length
-    ? Object.keys(available)
-    : ['orb', 'sift', 'akaze', 'xfeat_mnn', 'xfeat_lg'];
+  // Two sources, two shapes, and they must be normalised or the greying-out
+  // silently stops working. `/api/methods` returns the full survey --
+  // {orb: {available, reason, label, blurb}} -- while the processing layer's
+  // state carries `methods_available`, a plain {orb: true} boolean map. The
+  // old code tested `available[m] === false` against whichever arrived, so
+  // with the survey (an object, never === false) nothing was ever disabled.
+  const raw = methods || pl.methods_available || {};
+  const info = (m) => {
+    const v = raw[m];
+    if (v && typeof v === 'object') return v;
+    return { available: v !== false, reason: '', label: m, blurb: '' };
+  };
+  const methodNames = Object.keys(raw).length
+    ? Object.keys(raw)
+    : ['orb', 'sift', 'akaze', 'xfeat_mnn', 'xfeat_lg',
+       'edgepoint2_t32', 'edgepoint2_s32', 'edgepoint2_s64'];
 
   return (
     <div className="panel">
@@ -68,12 +80,21 @@ export default function ControlBar({ layers, methods, disabled }) {
                       await send('data', { cmd: 'rebuild_map', method: m });
                       await send('processing', { cmd: 'set_method', method: m });
                     }}>
-              {methodNames.map((m) => (
-                <option key={m} value={m} disabled={available[m] === false}>
-                  {m}{available[m] === false ? ' (unavailable)' : ''}
-                </option>
-              ))}
+              {methodNames.map((m) => {
+                const i = info(m);
+                return (
+                  <option key={m} value={m} disabled={!i.available}
+                          title={i.available ? i.blurb : i.reason}>
+                    {i.label || m}{i.available ? '' : ' (unavailable)'}
+                  </option>
+                );
+              })}
             </select>
+            {(() => {
+              const i = info(pl.method || 'xfeat_mnn');
+              const text = i.available ? i.blurb : i.reason;
+              return text ? <span className="note">{text}</span> : null;
+            })()}
           </div>
 
           <div className="field">

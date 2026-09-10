@@ -141,22 +141,51 @@ on any ARM Linux board drags in ~1.1 GB of CUDA a Pi cannot execute.
 2D-features constructors and `cv2.AKAZE_create` disappears, killing the AKAZE
 baseline mid-run.
 
-### Raspberry Pi 4B (4/8 GB) — untested here, expected to run and miss
+### Raspberry Pi 4B (8 GB) — MEASURED. It runs. It does not close the loop.
 
-**Run `check_board.sh` and believe it over this paragraph.** The estimate: the
-A72 at 1.8 GHz against the Pi 5's A76 at 2.4 GHz is roughly 2.5–3× slower on
-this workload, plus a memory-bandwidth gap that hits the matmul-heavy match
-stage. That puts `edgepoint2_s64` around 700–840 ms and `xfeat_mnn` similar.
+**No longer an estimate.** A Pi 4 Model B Rev 1.5, 8 GB, 4 cores, aarch64, ran
+the full three-layer system against the Sydney tile with `edgepoint2_s64` and
+produced a correct fix: **335 inliers, 0.012 m error, accepted.** The session is
+in the logs repo under `raspberrypi/`.
 
-RAM is fine on either variant — 4 GB against a ~600 MB need.
+The estimate this replaces said 700–840 ms. The truth is **4231 ms**:
 
-So the honest expectation is **it runs, produces fixes, and does not close the
-loop** — the same category as the Pi 5, further from the line. That makes it a
-legitimate point on the joules-per-fix curve, which is the contribution no
-onboard AVL study reports. Measure it, record the energy, report it.
+| stage | ms |
+|---|---|
+| `detect_frame` | 1404.5 |
+| `match` (9 tiles, 18432 ref keypoints) | 1578.3 |
+| `load_reference` | 138.3 |
+| `ransac` | 120.7 |
+| `rectify` | 11.0 |
+| `decode` | 6.0 |
+| **latency** | **4231.3** |
 
-Identical setup to the Pi 5. Use a 64-bit OS — a 32-bit userland has no
-usable torch wheel.
+So the earlier guess was **5× optimistic**, which is the whole reason
+`check_board.sh` exists. Note also that the run was at `frame_px: 512` and
+`max_keypoints: 2048` — already reduced settings — and 9 of 25 tiles searched,
+not all 25.
+
+**Three things its logs show, in order of how much they matter:**
+
+1. **`PLDE-03  84.7 C at or above 80.0 C`.** It thermally throttled. A Pi 4B
+   above 80 °C drops its clock, and every timing above was taken while that was
+   happening or about to. **A Pi 4B needs active cooling before any number off
+   it is worth recording** — a heatsink and a fan, not a case. Re-measure after
+   fitting one; the 4231 ms is an upper bound taken under throttle.
+2. **`PLE-09  4231 ms over the 250 ms budget.`** 17× over. Nothing in the config
+   closes that gap; it is the board.
+3. **`PLE-10  6 stale frames dropped.`** The feed was pinned at `fps: 1` and
+   compute still could not keep up. Set `feed.fps: auto` and let the pacer
+   derive it — it publishes one frame every median `stage_ms × 1.15`, so the
+   consumer waits on an empty queue instead of the frame waiting in it.
+
+**This is a good result, not a bad one.** "Runs and produces fixes" and "closes
+the loop in 250 ms" are different questions, and the joules-per-fix curve across
+compute classes — the contribution no onboard AVL study reports — only needs the
+first. The Pi 4B is a legitimate curve point. Record its energy and report it.
+
+Identical setup to the Pi 5. Use a 64-bit OS — a 32-bit userland has no usable
+torch wheel.
 
 ### Raspberry Pi 3B (1 GB) — will run, slowly; RAM is tight not fatal
 

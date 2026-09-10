@@ -100,9 +100,18 @@ mkdir -p "$DEVICE"
 
 # A one-line record of what this device IS, so a session's numbers can be read
 # against the hardware that produced them without guessing from the hostname.
-"$REPO/.venv/bin/python" - "$DEVICE/board.json" <<'PYEOF' 2>/dev/null || true
+#
+# The repo path is passed as argv[2], NOT read from the environment. It used to
+# be `os.environ.get("REPO", ".")`, and `REPO` is a plain shell variable that
+# was never exported -- so the lookup always missed, fell back to ".", and "."
+# at this point is $FLEET_DIR rather than the repo. Every board.json ever
+# written by this script therefore carried
+#     "detect_error": "No module named 'geoanchor'"
+# and none of them recorded model, cores or RAM. That is the entire reason
+# board.json exists, and it silently did not do it on any device.
+"$REPO/.venv/bin/python" - "$DEVICE/board.json" "$REPO" <<'PYEOF' 2>/dev/null || true
 import json, os, sys, platform
-sys.path.insert(0, os.environ.get("REPO", "."))
+sys.path.insert(0, sys.argv[2])
 info = {"hostname": platform.node(), "arch": platform.machine(),
         "python": platform.python_version()}
 try:
