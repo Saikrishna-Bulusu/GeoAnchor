@@ -4,9 +4,32 @@ Written 10 Sept 2026, answering: *find NSW imagery other than the one we are
 using — or an older version — so we can match one against the other and get an
 idea of the actual benchmarking stats.*
 
-**Short answer:** it exists, it is free, it is fetchable in one command, and it
-returns **zero fixes**. That is the finding, and it is a useful one. The
-realistic cross-date number comes from somewhere else, and already exists.
+**The answer: refresh the reference map at least every three years.**
+
+That number comes from **Esri's World Imagery Wayback archive**, which keeps 196
+dated versions of the global basemap and gives 13 distinct captures of the
+Sydney CBD spanning 2014–2026 — free, no token, at the same 0.124 m/px the
+project's reference tile uses. Held at one resolution so only the date varies,
+the matcher works to about **3 years** and falls off a cliff after it:
+
+| gap | inliers | solved | median |
+|---|---|---|---|
+| 0.3 y | 31 | 24/24 | **3.34 m** |
+| 2.8 y | 20 | 22/24 | **7.58 m** |
+| **3.6 y** | **5** | **1/24** | **81.92 m** |
+
+Full curve, method and the two traps it walked into:
+[`../results/crossdate_wayback_curve.md`](../results/crossdate_wayback_curve.md).
+
+```bash
+python scripts/fetch_wayback_tile.py --match data/sydney/ref_tile.tif --list
+python scripts/fetch_wayback_tile.py --match data/sydney/ref_tile.tif --all \
+    --zoom 19 --outdir data/sydney/wayback_z19
+```
+
+The rest of this file is the NSW route, which was tried first. It is worth
+reading because NSW imagery is **CC BY** and Esri's is not — the pipeline flies
+against NSW, and Wayback is measurement-only working data.
 
 ---
 
