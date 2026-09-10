@@ -28,7 +28,11 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 REPO="$PWD"
 
-LOGS_REMOTE="${GEOANCHOR_LOGS_REMOTE:-git@github.com:Saikrishna-Bulusu/geoanchor-logs.git}"
+# HTTPS, not SSH: `gh auth login` sets up an HTTPS credential helper, and that
+# is what is present on these boards. An SSH default fails on a headless board
+# with "Host key verification failed", which reads as a permissions problem
+# rather than as a missing key. Override with GEOANCHOR_LOGS_REMOTE.
+LOGS_REMOTE="${GEOANCHOR_LOGS_REMOTE:-https://github.com/Saikrishna-Bulusu/geoanchor-logs.git}"
 FLEET_DIR="${GEOANCHOR_FLEET_DIR:-$REPO/fleet}"
 DEVICE="${GEOANCHOR_DEVICE:-$(hostname -s)}"
 PULL_ONLY=0
