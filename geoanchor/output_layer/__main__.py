@@ -40,6 +40,13 @@ class OutputLayer:
         self.running = True
         self.board = device.detect()
         self.time_step = 0
+        # Records seen in the last 10 s. The other two layers each keep one of
+        # these and this one did not -- `rate_hz` was the literal 0.0, so the
+        # dashboard's Output layer card read "0.00 Hz" for the whole of every
+        # flight while records were being written normally. On a panel whose
+        # entire job is showing which of three independent processes is alive,
+        # a permanent zero is the exact wrong answer.
+        self._rate_window: list = []
         self.gps_hist: deque = deque(maxlen=200)
         self.map_info: dict = None
         self.fc: FlightControllerLink = None
@@ -212,6 +219,7 @@ class OutputLayer:
 
     def on_fix(self, fix: dict) -> None:
         self.time_step += 1
+        self._rate_window.append(time.monotonic())
         actual, dt = self.pair(fix["t_capture_unix"])
         codes: list = []
 
@@ -357,10 +365,12 @@ class OutputLayer:
             self.log.throttled(exc.code, 30.0, str(exc))
 
     def publish_status(self) -> None:
+        cut = time.monotonic() - 10.0
+        self._rate_window = [t for t in self._rate_window if t > cut]
         st = StatusPacket(
             layer=LAYER, t_unix=K.now_unix(), ready=self.rec is not None,
             uptime_s=round(self.log.uptime(), 1), last_code=self.log.last_code,
-            counts=self.log.tally(), rate_hz=0.0,
+            counts=self.log.tally(), rate_hz=round(len(self._rate_window) / 10.0, 2),
             config={
                 "loop_mode": self.loop_mode, "loss": self.loss_kind,
                 "pair_window_s": self.pair_window, "alarm_error_m": self.alarm_m,

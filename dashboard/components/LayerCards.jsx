@@ -15,7 +15,7 @@ const LAYERS = [
  */
 export default function LayerCards({ layers, logs, clockOffset = 0, replay = false }) {
   return (
-    <div className="grid cols-3">
+    <div className="row">
       {LAYERS.map((L) => {
         const entry = layers?.[L.id];
         const st = entry?.status;
@@ -32,13 +32,18 @@ export default function LayerCards({ layers, logs, clockOffset = 0, replay = fal
         const dev = counts.live_device_errors || 0;
         const rows = (logs || []).filter((l) => l.layer === L.id).slice(-60).reverse();
 
-        let tone = 'stale';
-        if (replay) tone = st ? (counts.device_errors ? 'warn' : '') : 'stale';
-        else if (fresh && dev === 0) tone = 'live';
+        // Tones are the shared .dot classes -- ok / warn / bad -- not a private
+        // live/stale vocabulary. They used to be, and the classes did not
+        // exist, so every dot on the Admin view rendered the same grey
+        // whatever the layer was doing.
+        let tone = 'bad';
+        if (replay) tone = st ? (counts.device_errors ? 'warn' : 'ok') : 'bad';
+        else if (fresh && dev === 0) tone = 'ok';
         else if (fresh) tone = 'warn';
 
         return (
-          <div className="panel layer" key={L.id}>
+          <div className="panel logcard" key={L.id}>
+            <span className="marks" aria-hidden="true" />
             <div className="head">
               <span className={`dot ${tone}`} />
               <span className="name">{L.name}</span>

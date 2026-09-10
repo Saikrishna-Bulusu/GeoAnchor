@@ -7,7 +7,7 @@ import MetricChart from '@/components/MetricChart';
 import PipelineStrip from '@/components/PipelineStrip';
 import RecordTable from '@/components/RecordTable';
 import StepProgress from '@/components/StepProgress';
-import TrackMap from '@/components/TrackMap';
+import TrackMap, { fitView } from '@/components/TrackMap';
 import { apiBase, downloadJSON, getJSON } from '@/lib/api';
 import { useTelemetry } from '@/lib/useTelemetry';
 import { BANDS, CFG, toRows } from '@/lib/thresholds';
@@ -210,7 +210,24 @@ export default function Page() {
     : '';
 
   const zoomBy = (k) => setView((v) => ({ ...v, zoom: Math.max(0.6, Math.min(14, v.zoom * k)) }));
-  const fitFlight = () => setView({ cx: 0.5, cy: 0.5, zoom: 1 });
+
+  // Fit the TRACK, which is what the button says. It used to reset to
+  // {cx: .5, cy: .5, zoom: 1} -- that is "fit the whole reference tile", the
+  // `whole` branch of viz.fitView -- so on a flight covering a corner of a
+  // 4112 px tile the button zoomed OUT and lost the track rather than framing
+  // it. Following also fights it: the follow effect re-centres on the vehicle
+  // every fix, so a fit while following is undone before it is seen. Turn it
+  // off, the same way dragging the map does.
+  const fitFlight = useCallback(() => {
+    if (!mapCanvas.current || !state.map || !records.length) return;
+    setFollow(false);
+    setView(fitView(mapCanvas.current, state.map, records, false));
+  }, [state.map, records]);
+
+  const fitWhole = useCallback(() => {
+    setFollow(false);
+    setView({ cx: 0.5, cy: 0.5, zoom: 1 });
+  }, []);
 
   // The legend spells out the same rule `band()` applies, in the same three
   // colours, so the key under the map and the colour on the track cannot drift.
@@ -238,7 +255,7 @@ export default function Page() {
           <span className="brand">GeoAnchor</span>
           <span className="sub">GNSS-denied absolute visual localization</span>
         </div>
-        <span style={{ flex: 1 }} />
+        <span className="spacer" />
         {/* Role is a view filter, never a permission. Admin adds the step
             codes, the record table and the camera; it unlocks nothing,
             because the control path is the API's and is identical either way. */}
@@ -366,7 +383,11 @@ export default function Page() {
                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                    <button className="btn icon" title="zoom out" onClick={() => zoomBy(1 / 1.3)}>&minus;</button>
                    <button className="btn icon" title="zoom in" onClick={() => zoomBy(1.3)}>+</button>
-                   <button className="btn" onClick={fitFlight}>Fit flight</button>
+                   <button className="btn" onClick={fitFlight} disabled={!records.length}
+                           title="frame the track">Fit flight</button>
+                   <button className="btn" onClick={fitWhole} title="frame the whole reference tile">
+                     Fit map
+                   </button>
                    <button className={`btn ${follow ? 'on' : ''}`}
                            onClick={() => setFollow((f) => !f)}>Follow</button>
                    <button className="btn" onClick={() => setExpanded(expanded === 'map' ? null : 'map')}>
@@ -374,7 +395,12 @@ export default function Page() {
                    </button>
                  </div>
                )}>
-          <div className="mapbox" style={{ height: expanded === 'map' ? 700 : 460, flex: 'none' }}>
+          {/* Heights are viewport-relative with a pixel floor, not a fixed
+              460. A hard 460 px is most of a phone screen before the panel
+              chrome, and it cannot be overridden from CSS because an inline
+              style wins over a media query. */}
+          <div className="mapbox" style={{ flex: 'none',
+                 height: expanded === 'map' ? 'min(80vh, 700px)' : 'clamp(300px, 46vh, 460px)' }}>
             <TrackMap map={state.map} records={records} basemap={state.basemap}
                       metric={metric} cursor={cursor} hover={hover} sel={sel} bands={bands}
                       onHover={setHover} onPick={setCursor} follow={follow}
@@ -438,7 +464,8 @@ export default function Page() {
             {/* CameraView draws its own alt/yaw/capture-age overlay from the
                 FRAME's telemetry, which is the right source here -- it is the
                 attitude that frame was rectified with, not the cursor's. */}
-            <div style={{ position: 'relative', height: 300, background: '#000' }}>
+            <div style={{ position: 'relative', height: 'clamp(200px, 30vh, 300px)',
+                          background: '#000' }}>
               <CameraView frame={state.frame} bare />
             </div>
           </Panel>
@@ -494,7 +521,7 @@ export default function Page() {
               <div className="head">
                 <button className={`title ${metric === m ? 'on' : ''}`} onClick={() => setMetric(m)}
                         title="colour the track by this">{bands[m].label}</button>
-                <span className="spacer" style={{ flex: 1 }} />
+                <span className="spacer" />
                 {here && here[m] != null && (
                   <span className="read" style={{ color: readColour(m, here[m]) }}>
                     {fmtMetric(m, here[m])}
@@ -528,7 +555,7 @@ export default function Page() {
           <div className="fs-head">
             <span className="fs-title">{bands[expanded].label}</span>
             <span className="meta">{bands[expanded].why}</span>
-            <span style={{ flex: 1 }} />
+            <span className="spacer" />
             <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
               {GRAPHS.map((m) => (
                 <button key={m} className={`btn sm ${expanded === m ? 'on' : ''}`}

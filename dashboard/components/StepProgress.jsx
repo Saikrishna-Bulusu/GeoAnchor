@@ -35,11 +35,11 @@ export default function StepProgress({ layers, codes }) {
 
   return (
     <div className="panel">
+      <span className="marks" aria-hidden="true" />
       <header>
         <h2>Steps completed</h2>
-        <span className="note" style={{ marginLeft: 'auto' }}>
-          filled = fired this session &middot; hover for the code
-        </span>
+        <span className="spacer" />
+        <span className="meta">filled = fired this session &middot; hover for the code</span>
       </header>
       <div className="body" style={{ display: 'grid', gap: 12 }}>
         {LAYERS.map((L) => {

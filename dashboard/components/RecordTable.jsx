@@ -8,9 +8,10 @@ function RecordTable({ records }) {
   const rows = (records || []).slice(-300).reverse();
   return (
     <div className="panel">
+      <span className="marks" aria-hidden="true" />
       <header>
         <h2>Records</h2>
-        <span className="note" style={{ marginLeft: 'auto' }}>
+        <span className="spacer" /><span className="meta">
           newest first &mdash; rejected fixes are kept, not dropped
         </span>
       </header>

@@ -82,7 +82,7 @@ export default function CameraView({ frame, fps = 3, bare = false }) {
       <span className="marks" aria-hidden="true" />
       <header>
         <h2>Camera</h2>
-        <span className="spacer" style={{ flex: 1 }} />
+        <span className="spacer" />
         <span className="meta">
           {frame
             // w/h describe the JPEG, which is the rescaled frame the matcher
