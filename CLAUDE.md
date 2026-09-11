@@ -510,83 +510,57 @@ tile count silently measured `satellite_map__*` alongside `ref_tile__*` and,
 because the outputs were keyed by method name, the second run of each method
 overwrote the first. Filter on the store name, and key outputs by store.
 
-### The Pi 4B end-to-end run: 1833 ms, and the matcher is all of it
+### The Pi 4B end-to-end run: 1739 ms, and the layers are contending with each other
 
 `configs/system.yaml`, edgepoint2_s64, 25 tiles / 51200 reference keypoints,
 60 frames, three layers over the real bus, `fc.enabled` false throughout.
-58 fixes, 58 accepted, median error 0.007 m -- which measures plumbing, not
+57 fixes, 57 accepted, median error 0.007 m -- which measures plumbing, not
 localization, because this config cuts its frames out of the reference map.
+Quiet board: clocks pinned, avahi disabled, idle loadavg 0.67, no throttling.
 
-    median latency   1833.0 ms          p95   2555.9 ms
+    median latency   1738.9 ms          p95   3047.0 ms
 
-    stage_ms, median          match            923.5
-                              detect_frame     734.9
+    stage_ms, median          match            887.5
+                              detect_frame     687.9
                               ransac            20.9
                               tiles_fitted      11.0
-                              rectify            7.9
+                              rectify            8.0
                               decode             4.2
-                              load_reference     3.1
-                              sum             1705.6
+                              load_reference     2.9
+                              sum             1622.4
 
-**The architecture costs 47 ms of 1833.** Detect and match are 1658 of the
-1706 summed stage milliseconds. That is the same conclusion the Xavier reached
-at 12 ms of 250, on a board seven times slower: the bus, the rectifier, the
-tile selection and the solve are not what is missing the budget, and no amount
-of work on them moves this number. Against ArduPilot's 250 ms this board is
-7.3x over, so a Pi 4B does not fly this pipeline at edgepoint2_s64 / 25 tiles
--- it runs it, scores it, and exports it, which is what a bench board is for.
+**The architecture costs 34 ms of 1739.** Detect and match are 1575 of the
+1622 summed stage milliseconds. Same conclusion the Xavier reached at 12 ms of
+250, on a board seven times slower.
 
-### env80 on the Pi 4B: the accuracy transfers, the latency does not
+**Killing avahi moved this by 5%, not 35%, and that is the interesting part.**
+The isolated matcher benchmark gained 36% from the same change (edgepoint2_s64
+892.7 -> 567.3). End to end it gained 5.1%: 1833.0 -> 1738.9. The reason is
+that the live pipeline is already contending with *itself*, so freeing 0.58 of
+a core barely registers. The clean measurement:
 
-All twelve combinations, `results/env80_sweep_pi4/`. Scene_09 and Scene_10,
-satellite reference, cold start, gate applied afterwards, same modules as the
-live system with the bus removed.
+    detect on the same 646x484 frame, edgepoint2_s64, same board, same clocks
 
-    Scene_09        n  plaus   medLat | acc@12  med_m  p90_m  p99_m   max_m
-    orb           134   0.03    748.8 |   0.01  12.81  18.28  19.51   19.64
-    akaze         134   0.02    941.6 |   0.00      -      -      -       -
-    sift          134   0.06   4866.8 |   0.00      -      -      -       -
-    xfeat_mnn     134   0.47   3036.8 |   0.29   2.67   4.49   5.93    5.96
-    edgepoint2_s64 134  0.30   3141.4 |   0.14   2.51   2.97   3.39    3.43
-    xfeat_lg      134   0.10  60819.4 |   0.08   3.21   4.93   7.37    7.64
+        isolated, one process            439.5 ms
+        inside the live pipeline         687.9 ms
+        cost of the other three layers   248.4 ms   (57% slower)
 
-    Scene_10        n  plaus   medLat | acc@12  med_m  p90_m  p99_m   max_m
-    orb           192   0.00     59.2 |   0.00      -      -      -       -
-    akaze         192   0.03     69.8 |   0.01   4.56   4.88   4.95    4.96
-    sift          192   0.00    189.7 |   0.00      -      -      -       -
-    xfeat_mnn     192   0.19    306.3 |   0.17   3.48   4.73   6.54    6.75
-    edgepoint2_s64 192  0.42    260.2 |   0.34   3.79   4.68   6.03    6.62
-    xfeat_lg      192   0.36   2686.1 |   0.36   3.74   4.60   5.77    5.80
+Detection does not depend on tile count, on the reference, or on anything the
+other layers own, so this is apples to apples: **248 ms of the 1739 is the data
+layer, output layer and API competing with the matcher for four cores.** That
+is 14% of the budget being spent on being three processes instead of one, and
+it is a different quantity from the 34 ms of bus and serialisation overhead
+above -- that measures the architecture's *messaging*, this measures its
+*scheduling*.
 
-**The plausible rate matches the laptop on nine of ten shared rows exactly**,
-and the tenth is one frame (orb on Scene_09, 0.03 against 0.04). Errors are
-geometry, so this was the expected outcome -- but it is the check worth having,
-because it says the board is running the same pipeline rather than a subtly
-different one, and it is the reason the accuracy columns above can be read as
-results rather than as this board's results.
+The lever is core affinity and thread budgeting, not a redesign: `taskset` the
+processing layer onto three cores and the other three processes onto the
+fourth, or drop `torch.set_num_threads` to 3 so the matcher stops oversubscribing
+a board that has other work to do. Untested -- worth a measurement before it is
+believed, like everything else here.
 
-Latency is 8.6x to 39.4x the laptop, and the ratio is not a constant: sift is
-the worst at 39.4x, xfeat_lg the mildest at 9.5-13.4x. Do not scale a laptop
-number by one factor to predict this board.
-
-Two things this adds that the older sweep could not say:
-
-- **EdgePoint2 is the only matcher that works on both scenes.** At gate 12 it
-  accepts 0.14 and 0.34 where xfeat_mnn does 0.29 and 0.17 -- xfeat_mnn is
-  strong on Scene_09 and weak on Scene_10, and EdgePoint2 is the one that does
-  not collapse on either. Its tail on Scene_09 is also the tightest of any
-  method, p99 3.39 and a worst case of 3.43 m, against xfeat_mnn's 5.93/5.96
-  and xfeat_lg's 7.37/7.64.
-- **xfeat_lg is not usable here and Scene_09 is why.** 60.8 s per frame median,
-  a p95 of 65.8 s, for a gate-12 accept rate of 0.08. On Scene_10 the same
-  matcher costs 2.7 s and accepts 0.36. That is the quadratic-in-keypoints cost
-  landing on the scene with more matches, which is the same shape as the
-  "xfeat_lg costs the most exactly when it fails" finding above, now with a
-  second scene to contrast against.
-
-The gate is still an open question rather than a settled one: these are the
-gate-12 columns, and the CSVs carry gates 0-60 per frame for whoever wants to
-argue the trade between EdgePoint2's accept rate and its tail.
+One number got worse: p95 went 2555.9 -> 3047.0. Do not read much into it; at
+n=57 a p95 is three samples, and the medians are the robust comparison.
 
 ### Pi 5 baseline to compare against
 
