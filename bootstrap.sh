@@ -94,7 +94,18 @@ step "5/9  torch (CPU only -- this is the step that goes wrong)"
 if python -c "import torch" 2>/dev/null; then
   ok "torch $(python -c 'import torch;print(torch.__version__)') already installed"
 else
-  if [ "$PYMINOR" -eq 8 ]; then TORCH_SPEC="torch==2.4.1"; else TORCH_SPEC="torch<2.11"; fi
+  if [ "$PYMINOR" -eq 8 ]; then
+    TORCH_SPEC="torch==2.4.1"
+  elif [ "$ARCH" = "aarch64" ] && ! grep -qw asimddp /proc/cpuinfo 2>/dev/null; then
+    # Cortex-A72 and older (Pi 4 and earlier: ARMv8.0-A, no FEAT_DotProd /
+    # asimddp) SIGILLs on a bare `import torch` from 2.10.0 onward -- oneDNN's
+    # ACL backend emits SDOT/UDOT unconditionally there rather than dispatching
+    # on runtime CPU features. 2.9.0 is the newest wheel confirmed clean.
+    # Caught on a Pi 4B, 10 Sept 2026 -- see CLAUDE.md "Board notes: Pi 4".
+    TORCH_SPEC="torch<2.10,>=2.6"
+  else
+    TORCH_SPEC="torch<2.11"
+  fi
   echo "   installing $TORCH_SPEC -- 100-200 MB, several minutes, and it looks stalled."
   echo "   Watch from another terminal with:  watch -n 5 'du -sh ~/.cache/pip'"
   PIPI=(python -m pip install --progress-bar on --timeout 120 --retries 3 --only-binary=:all:)
