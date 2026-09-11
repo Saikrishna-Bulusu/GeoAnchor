@@ -1,0 +1,168 @@
+{
+ "frame": [
+  484,
+  646
+ ],
+ "reps": 15,
+ "note": "Pi 4B. One method per invocation, board cooled below 58 C before each, clocks pinned (scaling_min_freq == scaling_max_freq == 1800000). vcgencmd get_throttled stayed 0x0 for the whole session, so no row is thermally compromised. The board was NOT idle: the desktop stack (labwc, wayvnc, rpi-connectd, pcmanfm), a permanently spinning avahi-daemon (~40% of one core) and the Claude Code harness together hold ~1.5 cores. Those were reniced to 19 and the matcher run at nice -5, but loadavg still read 4.5-5.9 during the run. observed_range_ms is the spread over repeated runs and is the honest uncertainty: OpenCV methods are stable to ~5%, torch methods vary up to ~40%, which is the contention signature CLAUDE.md warns about.",
+ "conditions_before": {
+  "torch": "2.9.0+cpu",
+  "torch_threads": 4,
+  "machine": "aarch64",
+  "board": {
+   "kind": "pi",
+   "model": "Raspberry Pi 4 Model B Rev 1.5",
+   "cores": 4
+  },
+  "governor": "performance",
+  "min_khz": "1800000",
+  "max_khz": "1800000",
+  "cur_khz": "1800000",
+  "pinned": true,
+  "loadavg": 4.6572265625,
+  "temp_c": 42.8,
+  "throttled": "0x0",
+  "power_w": null
+ },
+ "conditions_after": {
+  "torch": "2.9.0+cpu",
+  "torch_threads": 4,
+  "machine": "aarch64",
+  "board": {
+   "kind": "pi",
+   "model": "Raspberry Pi 4 Model B Rev 1.5",
+   "cores": 4
+  },
+  "governor": "performance",
+  "min_khz": "1800000",
+  "max_khz": "1800000",
+  "cur_khz": "1800000",
+  "pinned": true,
+  "loadavg": 5.36279296875,
+  "temp_c": 46.7,
+  "throttled": "0x0",
+  "power_w": null
+ },
+ "rows": [
+  {
+   "method": "orb",
+   "store": "ref_tile__orb__c57279e4db53be21",
+   "tiles": 1,
+   "ref_keypoints": 2048,
+   "detect_ms": 57.8,
+   "match_ms": 106.9,
+   "total_ms": 164.7,
+   "total_p95_ms": 203.7,
+   "observed_range_ms": [
+    164.7,
+    171.1
+   ],
+   "n_runs": 2
+  },
+  {
+   "method": "akaze",
+   "store": "ref_tile__akaze__1cd71086a49606a1",
+   "tiles": 1,
+   "ref_keypoints": 2048,
+   "detect_ms": 199.3,
+   "match_ms": 50.8,
+   "total_ms": 250.1,
+   "total_p95_ms": 278.2,
+   "observed_range_ms": [
+    230.5,
+    291.6
+   ],
+   "n_runs": 3
+  },
+  {
+   "method": "sift",
+   "store": "ref_tile__sift__2f756ad731ba4d3b",
+   "tiles": 1,
+   "ref_keypoints": 2048,
+   "detect_ms": 258.1,
+   "match_ms": 432.4,
+   "total_ms": 690.5,
+   "total_p95_ms": 794.9,
+   "observed_range_ms": [
+    690.5,
+    716.8
+   ],
+   "n_runs": 2
+  },
+  {
+   "method": "edgepoint2_s32",
+   "store": "ref_tile__edgepoint2_s32__832e10bb66d14d96",
+   "tiles": 1,
+   "ref_keypoints": 2048,
+   "detect_ms": 581.5,
+   "match_ms": 140.6,
+   "total_ms": 722.1,
+   "total_p95_ms": 826.7,
+   "observed_range_ms": [
+    722.1,
+    940.5
+   ],
+   "n_runs": 3
+  },
+  {
+   "method": "edgepoint2_t32",
+   "store": "ref_tile__edgepoint2_t32__f178b681d3cf27ac",
+   "tiles": 1,
+   "ref_keypoints": 2048,
+   "detect_ms": 668.8,
+   "match_ms": 175.5,
+   "total_ms": 844.3,
+   "total_p95_ms": 1034.1,
+   "observed_range_ms": [
+    690.5,
+    844.3
+   ],
+   "n_runs": 3
+  },
+  {
+   "method": "edgepoint2_s64",
+   "store": "ref_tile__edgepoint2_s64__48af42f31f99f5ee",
+   "tiles": 1,
+   "ref_keypoints": 2048,
+   "detect_ms": 705.9,
+   "match_ms": 186.8,
+   "total_ms": 892.7,
+   "total_p95_ms": 991.6,
+   "observed_range_ms": [
+    723.0,
+    1232.4
+   ],
+   "n_runs": 3
+  },
+  {
+   "method": "xfeat_mnn",
+   "store": "ref_tile__xfeat_mnn__b1947bf4dfb50451",
+   "tiles": 1,
+   "ref_keypoints": 2048,
+   "detect_ms": 903.0,
+   "match_ms": 206.4,
+   "total_ms": 1109.3,
+   "total_p95_ms": 1321.4,
+   "observed_range_ms": [
+    1109.3,
+    1258.8
+   ],
+   "n_runs": 2
+  },
+  {
+   "method": "xfeat_lg",
+   "store": "ref_tile__xfeat_lg__73c9c6f7c37766e8",
+   "tiles": 1,
+   "ref_keypoints": 2048,
+   "detect_ms": 837.9,
+   "match_ms": 8210.3,
+   "total_ms": 9048.2,
+   "total_p95_ms": 9585.4,
+   "observed_range_ms": [
+    8149.2,
+    9048.2
+   ],
+   "n_runs": 2
+  }
+ ]
+}

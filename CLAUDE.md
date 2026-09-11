@@ -412,6 +412,103 @@ of this.
   reading returns `None`, never `0.0` -- a zero silently becomes a J/fix of
   zero, and that has already cost one run.
 
+### Board notes: Pi 4
+
+- **`import torch` SIGILLs on 2.10.0+.** Cortex-A72 (this board's core, and the
+  same core as the Zero 2 W and CM4) is ARMv8.0-A and has no `asimddp`
+  (`FEAT_DotProd`) -- `grep Features /proc/cpuinfo` will not show it, where a
+  Pi 5's A76 does. From PyTorch 2.10.0 the aarch64 wheel's oneDNN/ACL backend
+  emits `SDOT`/`UDOT` unconditionally rather than dispatching on the runtime
+  CPU, so the interpreter dies on the bare import with no Python traceback --
+  it is a hardware trap, not a catchable exception, so `except ImportError`
+  in `preflight.py` cannot see it either; the symptom there is the whole
+  process exiting mid-check. Bisected 10 Sept 2026: 2.6.0-2.9.0 import clean,
+  2.10.0 does not. `bootstrap.sh` step 5 now pins `torch<2.10,>=2.6` on any
+  aarch64 board without `asimddp`; kornia (LighterGlue) inherits the fix since
+  it only imports torch, nothing binary of its own.
+- No power probe on a plain Pi 4 (`vcgencmd` reports temperature but not
+  current/voltage the way the INA3221-equipped boards do) -- see the
+  preflight note under "power probe" in `geoanchor/device.py`. Use an inline
+  meter and log it by hand; joules per fix is the headline number this
+  project reports.
+- `vcgencmd get_throttled` is the check to run after any timing or energy
+  run, same as `jetson_clocks` on the Xavier and the governor/frequency pin on
+  the Pi 5 -- a nonzero bit 19 (0x80000) means the soft temperature limit has
+  already fired since boot, and a number taken after that is not comparable
+  to one taken on a cool board. Active cooling before trusting anything here.
+
+### Pi 4B measured, 11 Sept 2026
+
+First full benchmark on a Pi 4B. Conditions, because a number without them is
+not a result: clocks pinned (`scaling_min_freq == scaling_max_freq == 1800000`,
+governor `performance`), `vcgencmd get_throttled` **0x0 for the whole session**,
+one method per process with the board cooled below 58 C before each, 15 reps,
+1 tile / 2048 reference keypoints, frame 646x484. Raw:
+`results/bench_matchers_pi4.json`.
+
+    method              detect     match     total       p95   range over runs
+    orb                   57.8     106.9     164.7     203.7       165-171
+    akaze                199.3      50.8     250.1     278.2       230-292
+    sift                 258.1     432.4     690.5     794.9       690-717
+    edgepoint2_s32       581.5     140.6     722.1     826.7       722-940
+    edgepoint2_t32       668.8     175.5     844.3    1034.1       690-844
+    edgepoint2_s64       705.9     186.8     892.7     991.6      723-1232
+    xfeat_mnn            903.0     206.4    1109.3    1321.4     1109-1259
+    xfeat_lg             837.9    8210.3    9048.2    9585.4     8149-9048
+
+Two findings already in this file reproduce on a third board. **XFeat is slower
+than SIFT on ARM** -- 1109 against 690 -- and **EdgePoint2 beats xfeat_mnn**,
+893 against 1109, the same direction as the Pi 5 and the Xavier.
+
+**`range over runs` is the honest uncertainty, and it is the headline caveat.**
+The OpenCV methods repeat to about 5%; the torch methods move up to 40% between
+otherwise identical runs. That is the contention signature this file already
+describes, and the cause was found rather than assumed: this board runs a
+desktop (labwc, wayvnc, rpi-connectd, pcmanfm), an `avahi-daemon` that spins at
+roughly 40% of a core and comes back spinning after both a restart and a reboot,
+and the agent harness that drove the run. Together about 1.5 of 4 cores.
+Renicing all of them to 19 and running the matcher at `nice -5` narrowed the
+spread but did not close it; loadavg still read 4.5-5.9 during the run. **Quote
+the ranges, not the point estimates, until this table is retaken on a quiet
+board**, and prefer the ratios between methods, which survive the contention.
+
+Two traps this session paid for again, both already written down above and both
+still worth the reminder:
+
+- **The clock pin does not survive a reboot.** The board rebooted mid-session
+  and came back `ondemand`, 600000-1800000. Re-pin before every timing run.
+- **The first attempt was thrown away.** It ended at 81.3 C with
+  `throttled=0x80000` and a loadavg of 4.00 on 4 cores before rep 1. akaze read
+  279.5 ms there against 250.1 cooled, an 11% error entirely from board state.
+  Bit 19 is sticky until reboot, so once it fires nothing measured afterwards on
+  that boot is comparable.
+
+### The Pi 4B end-to-end run: 1833 ms, and the matcher is all of it
+
+`configs/system.yaml`, edgepoint2_s64, 25 tiles / 51200 reference keypoints,
+60 frames, three layers over the real bus, `fc.enabled` false throughout.
+58 fixes, 58 accepted, median error 0.007 m -- which measures plumbing, not
+localization, because this config cuts its frames out of the reference map.
+
+    median latency   1833.0 ms          p95   2555.9 ms
+
+    stage_ms, median          match            923.5
+                              detect_frame     734.9
+                              ransac            20.9
+                              tiles_fitted      11.0
+                              rectify            7.9
+                              decode             4.2
+                              load_reference     3.1
+                              sum             1705.6
+
+**The architecture costs 47 ms of 1833.** Detect and match are 1658 of the
+1706 summed stage milliseconds. That is the same conclusion the Xavier reached
+at 12 ms of 250, on a board seven times slower: the bus, the rectifier, the
+tile selection and the solve are not what is missing the budget, and no amount
+of work on them moves this number. Against ArduPilot's 250 ms this board is
+7.3x over, so a Pi 4B does not fly this pipeline at edgepoint2_s64 / 25 tiles
+-- it runs it, scores it, and exports it, which is what a bench board is for.
+
 ### Pi 5 baseline to compare against
 
 Canonical N=200 run, `performance` governor, no throttling. Warm means the
