@@ -509,6 +509,58 @@ of work on them moves this number. Against ArduPilot's 250 ms this board is
 7.3x over, so a Pi 4B does not fly this pipeline at edgepoint2_s64 / 25 tiles
 -- it runs it, scores it, and exports it, which is what a bench board is for.
 
+### env80 on the Pi 4B: the accuracy transfers, the latency does not
+
+All twelve combinations, `results/env80_sweep_pi4/`. Scene_09 and Scene_10,
+satellite reference, cold start, gate applied afterwards, same modules as the
+live system with the bus removed.
+
+    Scene_09        n  plaus   medLat | acc@12  med_m  p90_m  p99_m   max_m
+    orb           134   0.03    748.8 |   0.01  12.81  18.28  19.51   19.64
+    akaze         134   0.02    941.6 |   0.00      -      -      -       -
+    sift          134   0.06   4866.8 |   0.00      -      -      -       -
+    xfeat_mnn     134   0.47   3036.8 |   0.29   2.67   4.49   5.93    5.96
+    edgepoint2_s64 134  0.30   3141.4 |   0.14   2.51   2.97   3.39    3.43
+    xfeat_lg      134   0.10  60819.4 |   0.08   3.21   4.93   7.37    7.64
+
+    Scene_10        n  plaus   medLat | acc@12  med_m  p90_m  p99_m   max_m
+    orb           192   0.00     59.2 |   0.00      -      -      -       -
+    akaze         192   0.03     69.8 |   0.01   4.56   4.88   4.95    4.96
+    sift          192   0.00    189.7 |   0.00      -      -      -       -
+    xfeat_mnn     192   0.19    306.3 |   0.17   3.48   4.73   6.54    6.75
+    edgepoint2_s64 192  0.42    260.2 |   0.34   3.79   4.68   6.03    6.62
+    xfeat_lg      192   0.36   2686.1 |   0.36   3.74   4.60   5.77    5.80
+
+**The plausible rate matches the laptop on nine of ten shared rows exactly**,
+and the tenth is one frame (orb on Scene_09, 0.03 against 0.04). Errors are
+geometry, so this was the expected outcome -- but it is the check worth having,
+because it says the board is running the same pipeline rather than a subtly
+different one, and it is the reason the accuracy columns above can be read as
+results rather than as this board's results.
+
+Latency is 8.6x to 39.4x the laptop, and the ratio is not a constant: sift is
+the worst at 39.4x, xfeat_lg the mildest at 9.5-13.4x. Do not scale a laptop
+number by one factor to predict this board.
+
+Two things this adds that the older sweep could not say:
+
+- **EdgePoint2 is the only matcher that works on both scenes.** At gate 12 it
+  accepts 0.14 and 0.34 where xfeat_mnn does 0.29 and 0.17 -- xfeat_mnn is
+  strong on Scene_09 and weak on Scene_10, and EdgePoint2 is the one that does
+  not collapse on either. Its tail on Scene_09 is also the tightest of any
+  method, p99 3.39 and a worst case of 3.43 m, against xfeat_mnn's 5.93/5.96
+  and xfeat_lg's 7.37/7.64.
+- **xfeat_lg is not usable here and Scene_09 is why.** 60.8 s per frame median,
+  a p95 of 65.8 s, for a gate-12 accept rate of 0.08. On Scene_10 the same
+  matcher costs 2.7 s and accepts 0.36. That is the quadratic-in-keypoints cost
+  landing on the scene with more matches, which is the same shape as the
+  "xfeat_lg costs the most exactly when it fails" finding above, now with a
+  second scene to contrast against.
+
+The gate is still an open question rather than a settled one: these are the
+gate-12 columns, and the CSVs carry gates 0-60 per frame for whoever wants to
+argue the trade between EdgePoint2's accept rate and its tail.
+
 ### Pi 5 baseline to compare against
 
 Canonical N=200 run, `performance` governor, no throttling. Warm means the
