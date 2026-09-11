@@ -437,51 +437,78 @@ of this.
   already fired since boot, and a number taken after that is not comparable
   to one taken on a cool board. Active cooling before trusting anything here.
 
-### Pi 4B measured, 11 Sept 2026
+### Pi 4B measured, 11 Sept 2026 -- retaken on a quiet board
 
-First full benchmark on a Pi 4B. Conditions, because a number without them is
-not a result: clocks pinned (`scaling_min_freq == scaling_max_freq == 1800000`,
-governor `performance`), `vcgencmd get_throttled` **0x0 for the whole session**,
-one method per process with the board cooled below 58 C before each, 15 reps,
-1 tile / 2048 reference keypoints, frame 646x484. Raw:
+Conditions, because a number without them is not a result: clocks pinned
+(`scaling_min_freq == scaling_max_freq == 1800000`, governor `performance`),
+`vcgencmd get_throttled` **0x0 for the whole session**, peak 53 C, one method
+per process with the board cooled below 58 C before each, 15 reps, 1 tile /
+2048 reference keypoints, frame 646x484. Raw:
 `results/bench_matchers_pi4.json`.
 
-    method              detect     match     total       p95   range over runs
-    orb                   57.8     106.9     164.7     203.7       165-171
-    akaze                199.3      50.8     250.1     278.2       230-292
-    sift                 258.1     432.4     690.5     794.9       690-717
-    edgepoint2_s32       581.5     140.6     722.1     826.7       722-940
-    edgepoint2_t32       668.8     175.5     844.3    1034.1       690-844
-    edgepoint2_s64       705.9     186.8     892.7     991.6      723-1232
-    xfeat_mnn            903.0     206.4    1109.3    1321.4     1109-1259
-    xfeat_lg             837.9    8210.3    9048.2    9585.4     8149-9048
+    method              detect     match     total       p95   two quiet runs
+    orb                   55.9      96.1     152.0     155.5       151-152
+    akaze                221.3      60.8     282.1     338.8       256-282
+    edgepoint2_t32       358.3     109.0     467.3     503.1       467-469
+    edgepoint2_s32       422.2     102.1     524.3     676.4       516-524
+    sift                 219.6     347.3     566.9     595.2       526-567
+    edgepoint2_s64       439.5     127.8     567.3     605.2       567-567
+    xfeat_mnn            526.4     137.7     664.1     723.0       657-664
+    xfeat_lg             536.2    5690.3    6226.6    6541.2     6227-6257
 
-Two findings already in this file reproduce on a third board. **XFeat is slower
-than SIFT on ARM** -- 1109 against 690 -- and **EdgePoint2 beats xfeat_mnn**,
-893 against 1109, the same direction as the Pi 5 and the Xavier.
+Three orderings hold, the same direction as the Pi 5 and the Xavier. **XFeat is
+slower than SIFT on ARM** -- 664 against 567. **EdgePoint2 beats xfeat_mnn** --
+567 against 664. And `edgepoint2_t32` at 467 is now the fastest thing here that
+is not ORB, SIFT included.
 
-**`range over runs` is the honest uncertainty, and it is the headline caveat.**
-The OpenCV methods repeat to about 5%; the torch methods move up to 40% between
-otherwise identical runs. That is the contention signature this file already
-describes, and the cause was found rather than assumed: this board runs a
-desktop (labwc, wayvnc, rpi-connectd, pcmanfm), an `avahi-daemon` that spins at
-roughly 40% of a core and comes back spinning after both a restart and a reboot,
-and the agent harness that drove the run. Together about 1.5 of 4 cores.
-Renicing all of them to 19 and running the matcher at `nice -5` narrowed the
-spread but did not close it; loadavg still read 4.5-5.9 during the run. **Quote
-the ranges, not the point estimates, until this table is retaken on a quiet
-board**, and prefer the ratios between methods, which survive the contention.
+**The first version of this table was wrong by up to 45%, and the cause was one
+daemon.** It was measured while `avahi-daemon` burned ~58% of a core parsing a
+multicast flood -- 162 of 249 packets/s inbound on the wifi were multicast, and
+the daemon was doing real syscall work on every one of them, not spinning. It
+came back at full CPU after both a restart and a reboot because the cause was
+the network, not the process. Disabling it dropped idle loadavg from ~2.3 to
+~1.2 and moved every row:
+
+    method            contended     quiet    delta
+    orb                   164.7     152.0     -7.7%
+    akaze                 250.1     282.1    +12.8%
+    sift                  690.5     566.9    -17.9%
+    edgepoint2_s32        722.1     524.3    -27.4%
+    edgepoint2_s64        892.7     567.3    -36.5%
+    edgepoint2_t32        844.3     467.3    -44.7%
+    xfeat_mnn            1109.3     664.1    -40.1%
+    xfeat_lg             9048.2    6226.6    -31.2%
+
+`prior_contended_total_ms` in the JSON keeps the old number so the size of that
+error stays visible. **Nothing about the contended table was thermal** --
+`get_throttled` read 0x0 through both sessions. A pinned clock and a cool board
+were necessary and not sufficient; the third check is that nothing else is
+running, and this file's own `loadavg` warning fired on every contended run and
+was, correctly, believed.
+
+**The spread inverted, which is the part worth remembering.** Contended, the
+torch methods moved up to 40% run-to-run and the OpenCV ones about 5%. Quiet,
+the torch methods repeat to under 2% -- `edgepoint2_s64` lands on 566.9 and
+567.3 -- while `akaze` (10.4%) and `sift` (7.8%) are now the loosest rows.
+Sustained multi-threaded work is what contention damages, and once contention
+is gone it is also what averages out best; a 150-280 ms single-threaded run is
+the one left exposed to scheduler jitter. Read a wide spread on a short OpenCV
+row as noise, and a wide spread on a long torch row as a busy board.
 
 Two traps this session paid for again, both already written down above and both
 still worth the reminder:
 
 - **The clock pin does not survive a reboot.** The board rebooted mid-session
   and came back `ondemand`, 600000-1800000. Re-pin before every timing run.
-- **The first attempt was thrown away.** It ended at 81.3 C with
-  `throttled=0x80000` and a loadavg of 4.00 on 4 cores before rep 1. akaze read
-  279.5 ms there against 250.1 cooled, an 11% error entirely from board state.
-  Bit 19 is sticky until reboot, so once it fires nothing measured afterwards on
-  that boot is comparable.
+- **An attempt was thrown away at 81.3 C** with `throttled=0x80000` and a
+  loadavg of 4.00 on 4 cores before rep 1. Bit 19 is sticky until reboot, so
+  once it fires nothing measured afterwards on that boot is comparable.
+
+One harness trap, new: **`--tiles 1` is not a unique key.** The env80 sweep
+leaves its own 1-tile stores in `stores/`, so a benchmark loop filtering only on
+tile count silently measured `satellite_map__*` alongside `ref_tile__*` and,
+because the outputs were keyed by method name, the second run of each method
+overwrote the first. Filter on the store name, and key outputs by store.
 
 ### The Pi 4B end-to-end run: 1833 ms, and the matcher is all of it
 

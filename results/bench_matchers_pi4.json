@@ -4,7 +4,7 @@
   646
  ],
  "reps": 15,
- "note": "Pi 4B. One method per invocation, board cooled below 58 C before each, clocks pinned (scaling_min_freq == scaling_max_freq == 1800000). vcgencmd get_throttled stayed 0x0 for the whole session, so no row is thermally compromised. The board was NOT idle: the desktop stack (labwc, wayvnc, rpi-connectd, pcmanfm), a permanently spinning avahi-daemon (~40% of one core) and the Claude Code harness together hold ~1.5 cores. Those were reniced to 19 and the matcher run at nice -5, but loadavg still read 4.5-5.9 during the run. observed_range_ms is the spread over repeated runs and is the honest uncertainty: OpenCV methods are stable to ~5%, torch methods vary up to ~40%, which is the contention signature CLAUDE.md warns about.",
+ "note": "Pi 4B, RETAKEN on a quiet board. The earlier table in this file's git history was measured while avahi-daemon burned ~58% of a core parsing a multicast flood on the wifi; that daemon is now disabled and idle loadavg fell from ~2.3 to ~1.2. prior_contended_total_ms is the old number, kept so the size of the contention error stays visible. One method per process, board cooled below 58 C before each, clocks pinned (scaling_min_freq == scaling_max_freq == 1800000), get_throttled 0x0 for the whole session, peak 53 C. Only the ref_tile reference is measured here, at 1 tile / 2048 reference keypoints, frame 646x484, 15 reps. observed_range_ms spans two quiet runs.",
  "conditions_before": {
   "torch": "2.9.0+cpu",
   "torch_threads": 4,
@@ -19,8 +19,8 @@
   "max_khz": "1800000",
   "cur_khz": "1800000",
   "pinned": true,
-  "loadavg": 4.6572265625,
-  "temp_c": 42.8,
+  "loadavg": 2.5068359375,
+  "temp_c": 41.4,
   "throttled": "0x0",
   "power_w": null
  },
@@ -38,8 +38,8 @@
   "max_khz": "1800000",
   "cur_khz": "1800000",
   "pinned": true,
-  "loadavg": 5.36279296875,
-  "temp_c": 46.7,
+  "loadavg": 3.59814453125,
+  "temp_c": 49.2,
   "throttled": "0x0",
   "power_w": null
  },
@@ -49,120 +49,128 @@
    "store": "ref_tile__orb__c57279e4db53be21",
    "tiles": 1,
    "ref_keypoints": 2048,
-   "detect_ms": 57.8,
-   "match_ms": 106.9,
-   "total_ms": 164.7,
-   "total_p95_ms": 203.7,
+   "detect_ms": 55.9,
+   "match_ms": 96.1,
+   "total_ms": 152.0,
+   "total_p95_ms": 155.5,
    "observed_range_ms": [
-    164.7,
-    171.1
+    151.3,
+    152.0
    ],
-   "n_runs": 2
+   "n_runs": 2,
+   "prior_contended_total_ms": 164.7
   },
   {
    "method": "akaze",
    "store": "ref_tile__akaze__1cd71086a49606a1",
    "tiles": 1,
    "ref_keypoints": 2048,
-   "detect_ms": 199.3,
-   "match_ms": 50.8,
-   "total_ms": 250.1,
-   "total_p95_ms": 278.2,
+   "detect_ms": 221.3,
+   "match_ms": 60.8,
+   "total_ms": 282.1,
+   "total_p95_ms": 338.8,
    "observed_range_ms": [
-    230.5,
-    291.6
+    255.5,
+    282.1
    ],
-   "n_runs": 3
-  },
-  {
-   "method": "sift",
-   "store": "ref_tile__sift__2f756ad731ba4d3b",
-   "tiles": 1,
-   "ref_keypoints": 2048,
-   "detect_ms": 258.1,
-   "match_ms": 432.4,
-   "total_ms": 690.5,
-   "total_p95_ms": 794.9,
-   "observed_range_ms": [
-    690.5,
-    716.8
-   ],
-   "n_runs": 2
-  },
-  {
-   "method": "edgepoint2_s32",
-   "store": "ref_tile__edgepoint2_s32__832e10bb66d14d96",
-   "tiles": 1,
-   "ref_keypoints": 2048,
-   "detect_ms": 581.5,
-   "match_ms": 140.6,
-   "total_ms": 722.1,
-   "total_p95_ms": 826.7,
-   "observed_range_ms": [
-    722.1,
-    940.5
-   ],
-   "n_runs": 3
+   "n_runs": 2,
+   "prior_contended_total_ms": 250.1
   },
   {
    "method": "edgepoint2_t32",
    "store": "ref_tile__edgepoint2_t32__f178b681d3cf27ac",
    "tiles": 1,
    "ref_keypoints": 2048,
-   "detect_ms": 668.8,
-   "match_ms": 175.5,
-   "total_ms": 844.3,
-   "total_p95_ms": 1034.1,
+   "detect_ms": 358.3,
+   "match_ms": 109.0,
+   "total_ms": 467.3,
+   "total_p95_ms": 503.1,
    "observed_range_ms": [
-    690.5,
-    844.3
+    467.3,
+    469.4
    ],
-   "n_runs": 3
+   "n_runs": 2,
+   "prior_contended_total_ms": 844.3
+  },
+  {
+   "method": "edgepoint2_s32",
+   "store": "ref_tile__edgepoint2_s32__832e10bb66d14d96",
+   "tiles": 1,
+   "ref_keypoints": 2048,
+   "detect_ms": 422.2,
+   "match_ms": 102.1,
+   "total_ms": 524.3,
+   "total_p95_ms": 676.4,
+   "observed_range_ms": [
+    515.7,
+    524.3
+   ],
+   "n_runs": 2,
+   "prior_contended_total_ms": 722.1
+  },
+  {
+   "method": "sift",
+   "store": "ref_tile__sift__2f756ad731ba4d3b",
+   "tiles": 1,
+   "ref_keypoints": 2048,
+   "detect_ms": 219.6,
+   "match_ms": 347.3,
+   "total_ms": 566.9,
+   "total_p95_ms": 595.2,
+   "observed_range_ms": [
+    526.1,
+    566.9
+   ],
+   "n_runs": 2,
+   "prior_contended_total_ms": 690.5
   },
   {
    "method": "edgepoint2_s64",
    "store": "ref_tile__edgepoint2_s64__48af42f31f99f5ee",
    "tiles": 1,
    "ref_keypoints": 2048,
-   "detect_ms": 705.9,
-   "match_ms": 186.8,
-   "total_ms": 892.7,
-   "total_p95_ms": 991.6,
+   "detect_ms": 439.5,
+   "match_ms": 127.8,
+   "total_ms": 567.3,
+   "total_p95_ms": 605.2,
    "observed_range_ms": [
-    723.0,
-    1232.4
+    566.9,
+    567.3
    ],
-   "n_runs": 3
+   "n_runs": 2,
+   "prior_contended_total_ms": 892.7
   },
   {
    "method": "xfeat_mnn",
    "store": "ref_tile__xfeat_mnn__b1947bf4dfb50451",
    "tiles": 1,
    "ref_keypoints": 2048,
-   "detect_ms": 903.0,
-   "match_ms": 206.4,
-   "total_ms": 1109.3,
-   "total_p95_ms": 1321.4,
+   "detect_ms": 526.4,
+   "match_ms": 137.7,
+   "total_ms": 664.1,
+   "total_p95_ms": 723.0,
    "observed_range_ms": [
-    1109.3,
-    1258.8
+    656.6,
+    664.1
    ],
-   "n_runs": 2
+   "n_runs": 2,
+   "prior_contended_total_ms": 1109.3
   },
   {
    "method": "xfeat_lg",
    "store": "ref_tile__xfeat_lg__73c9c6f7c37766e8",
    "tiles": 1,
    "ref_keypoints": 2048,
-   "detect_ms": 837.9,
-   "match_ms": 8210.3,
-   "total_ms": 9048.2,
-   "total_p95_ms": 9585.4,
+   "detect_ms": 536.2,
+   "match_ms": 5690.3,
+   "total_ms": 6226.6,
+   "total_p95_ms": 6541.2,
    "observed_range_ms": [
-    8149.2,
-    9048.2
+    6226.6,
+    6257.4
    ],
-   "n_runs": 2
+   "n_runs": 2,
+   "prior_contended_total_ms": 9048.2
   }
  ]
 }
