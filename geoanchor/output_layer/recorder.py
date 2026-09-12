@@ -83,7 +83,8 @@ class Recorder:
                   ("output", "output.jsonl"))
 
     def __init__(self, run_dir: Path | str, header: dict = None, flush_every: int = 20,
-                 include_logs: bool = True, max_log_rows: int = 4000):
+                 include_logs: bool = True, max_log_rows: int = 4000,
+                 min_flush_interval_s: float = 20.0, max_records: int = 200_000):
         self.run_dir = Path(run_dir)
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.jsonl = self.run_dir / "records.jsonl"
@@ -93,10 +94,17 @@ class Recorder:
         self.flush_every = max(1, int(flush_every))
         self.include_logs = bool(include_logs)
         self.max_log_rows = int(max_log_rows)
+        # Ceiling on the wall-clock cost of rebuilding session.json, and on the
+        # memory held to do it. See flush() and append() for why both exist.
+        self.min_flush_interval_s = max(0.0, float(min_flush_interval_s))
+        self.max_records = max(1, int(max_records))
         self.rows: list = []
         self.layers: dict = {}        # last status per layer, for the layer cards
         self.extras: dict = {}        # map packet, basemap, code registry
         self._since_flush = 0
+        self._rows_dropped = 0        # only ever nonzero past max_records
+        self._last_flush_t = 0.0
+        self._log_state: dict = {}    # per layer: byte offset, kept rows, full tally
         self._fh = open(self.jsonl, "a", buffering=1)
 
     def set_extra(self, key: str, value) -> None:
@@ -123,42 +131,115 @@ class Recorder:
             path = self.run_dir / fname
             if not path.exists():
                 continue
-            rows = []
-            for line in path.read_text(errors="replace").splitlines():
-                line = line.strip()
-                if line:
+            st = self._log_state.setdefault(name, {"offset": 0, "rows": [], "tally": {}})
+            try:
+                size = path.stat().st_size
+            except OSError:
+                continue
+            # A shrunk file means it was rotated or rewritten under us; the
+            # offset no longer points where we think, so start it over.
+            if size < st["offset"]:
+                st.update(offset=0, rows=[], tally={})
+            if size > st["offset"]:
+                with open(path, "r", errors="replace") as fh:
+                    fh.seek(st["offset"])
+                    fresh = fh.read()
+                    st["offset"] = fh.tell()
+                # A trailing partial line is a row still being written. Push the
+                # offset back so the next pass re-reads it whole.
+                if fresh and not fresh.endswith("\n"):
+                    cut = fresh.rfind("\n")
+                    if cut == -1:
+                        st["offset"] -= len(fresh.encode("utf-8", "replace"))
+                        fresh = ""
+                    else:
+                        st["offset"] -= len(fresh[cut + 1:].encode("utf-8", "replace"))
+                        fresh = fresh[:cut + 1]
+                tally = st["tally"]
+                for line in fresh.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
                     try:
-                        rows.append(json.loads(line))
+                        r = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-            tally: dict = {}
-            for r in rows:
-                code = r.get("code")
-                if code:
-                    tally[code] = tally.get(code, 0) + 1
-            if len(rows) > self.max_log_rows:
-                faults = [r for r in rows if r.get("level") in ("error", "warn")]
-                steps = [r for r in rows if r.get("level") not in ("error", "warn")]
-                keep = max(0, self.max_log_rows - len(faults))
-                rows = sorted(faults + steps[-keep:], key=lambda r: r.get("t_unix", 0))
-            out[name] = {"rows": rows, "counts": tally, "total": sum(tally.values())}
+                    st["rows"].append(r)
+                    code = r.get("code")
+                    if code:
+                        tally[code] = tally.get(code, 0) + 1
+                # Trim here rather than at read time: the tally above has already
+                # counted every row the file has ever held, so what is dropped is
+                # only the copy carried in the document.
+                rows = st["rows"]
+                if len(rows) > self.max_log_rows:
+                    faults = [r for r in rows if r.get("level") in ("error", "warn")]
+                    steps = [r for r in rows if r.get("level") not in ("error", "warn")]
+                    keep = max(0, self.max_log_rows - len(faults))
+                    st["rows"] = sorted(faults + steps[-keep:],
+                                        key=lambda r: r.get("t_unix", 0))
+            out[name] = {"rows": list(st["rows"]), "counts": dict(st["tally"]),
+                         "total": sum(st["tally"].values())}
         return out
 
     def append(self, record) -> None:
         row = _json_safe(asdict(record) if hasattr(record, "__dataclass_fields__") else dict(record))
         self.rows.append(row)
         self._fh.write(json.dumps(row, default=str, allow_nan=False) + "\n")
+        # records.jsonl above is the complete record and is the crash-safe path:
+        # one line per fix, append-only, O(1). The list held here exists only to
+        # assemble session.json, so it is the thing that has to be bounded. A
+        # run is normally a flight and ends; a looping replay feed does not, and
+        # at max_records the oldest rows leave the document rather than the
+        # process growing until it is killed. records.jsonl still has them all.
+        if len(self.rows) > self.max_records:
+            drop = len(self.rows) - self.max_records
+            del self.rows[:drop]
+            self._rows_dropped += drop
         self._since_flush += 1
         if self._since_flush >= self.flush_every:
             self.flush()
 
-    def flush(self, summary: dict = None) -> Path:
+    def flush(self, summary: dict = None, force: bool = False) -> Path:
+        """Rebuild session.json. Rate-limited, because it is a whole-run document.
+
+        Every call serialises the entire run and re-reads the layer logs, so the
+        cost is proportional to how long the run has been going. Firing that
+        every flush_every records makes the total work quadratic in run length:
+        measured on a 4k-record run it is already 6 ms per record and climbing,
+        and over two days of a looping feed it reached seven saturated cores and
+        1.6 TB of rewritten bytes for a file nothing was reading.
+
+        flush_every alone cannot express the intent, because it counts records
+        instead of the work they imply. So the record counter proposes and the
+        clock decides: a rebuild happens at most once per min_flush_interval_s,
+        which bounds the overhead to a fraction of wall-clock no matter how long
+        the run lasts or how fast fixes arrive.
+
+        Nothing is lost by waiting. The durability promise belongs to
+        records.jsonl, which is written per record and already holds everything.
+        A skipped rebuild costs a stale session.json for a few seconds, and
+        close() and an explicit operator flush both pass force=True.
+        """
+        now = time.time()
+        if not force and self.min_flush_interval_s > 0.0 \
+                and (now - self._last_flush_t) < self.min_flush_interval_s:
+            return self.session
         doc = {
             "schema": 1,
             "header": self.header,
             "summary": summary or {},
             "records": self.rows,
         }
+        if self._rows_dropped:
+            # Say so in the file rather than letting a truncated export read as
+            # a complete one.
+            doc["records_truncated"] = {
+                "dropped_oldest": self._rows_dropped,
+                "kept": len(self.rows),
+                "cap": self.max_records,
+                "complete_record": self.jsonl.name,
+            }
         if self.layers:
             doc["layers"] = self.layers
         if self.include_logs:
@@ -168,10 +249,11 @@ class Recorder:
         tmp.write_text(json.dumps(_json_safe(doc), indent=2, default=str, allow_nan=False))
         tmp.replace(self.session)          # atomic, so a reader never sees half a file
         self._since_flush = 0
+        self._last_flush_t = now
         return self.session
 
     def close(self, summary: dict = None) -> Path:
-        path = self.flush(summary)
+        path = self.flush(summary, force=True)
         try:
             self._fh.close()
         except OSError:

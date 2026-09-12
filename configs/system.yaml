@@ -195,6 +195,17 @@ output_layer:
 
   export:
     flush_every: 20
+    # session.json is a whole-run document, so rebuilding it costs more the
+    # longer the run has gone. flush_every counts records, which does not bound
+    # that cost -- on a looping feed it went quadratic and burned seven cores
+    # for two days. The clock does bound it: at most one rebuild this often, no
+    # matter the record rate. records.jsonl is still written per record, so
+    # nothing is at risk in between.
+    min_flush_interval_s: 20.0
+    # Ceiling on records carried in memory to build session.json. A flight ends
+    # and never reaches this; a replay on loop does. Past it the oldest rows
+    # leave the document and it says so, and records.jsonl keeps all of them.
+    max_records: 200000
     # Make session.json answer for itself. The aircraft is GNSS-denied and
     # internet-denied by definition, so nobody is going to be watching the live
     # dashboard while it flies: the file brought back afterwards is the entire

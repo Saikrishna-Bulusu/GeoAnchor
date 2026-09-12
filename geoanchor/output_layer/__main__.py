@@ -109,6 +109,8 @@ class OutputLayer:
         ex = self.cfg.section("output_layer").get("export", {}) or {}
         self.rec = Recorder(self.run_dir, header,
                             flush_every=ex.get("flush_every", 20),
+                            min_flush_interval_s=ex.get("min_flush_interval_s", 20.0),
+                            max_records=ex.get("max_records", 200_000),
                             include_logs=ex.get("include_logs", True),
                             max_log_rows=ex.get("max_log_rows", 4000))
         # The step-code registry travels with the session. It is 113 short rows,
@@ -410,7 +412,7 @@ class OutputLayer:
                     self.open_fc()
                 self.log.step("OL-07", f"loop mode -> {mode}")
             elif cmd == "flush":
-                self.rec.flush(self.stats.summary())
+                self.rec.flush(self.stats.summary(), force=True)
                 self.log.step("OL-16", str(self.rec.session))
             elif cmd == "set" and "path" in msg:
                 self.cfg.set(msg["path"], msg.get("value"))
