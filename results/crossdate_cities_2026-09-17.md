@@ -19,6 +19,36 @@ python scripts/crossdate_table.py
 python scripts/wayback_source_meta.py --json results/wayback_source_meta.json
 ```
 
+## CORRECTION, same day: the "rural" area is not rural
+
+**`rural_griffith` at -34.29000, 146.05000 is the CENTRE OF THE TOWN OF
+GRIFFITH.** Looking at the tile settles it: 2.17 km of suburban streets, shop
+awnings along Banna Avenue, and industrial sheds. There is no farmland in it.
+Found 17 Sept 2026 while texturing the Gazebo world from the same tile — the
+first time anyone in this project looked at the pixels instead of the label.
+
+**The measurements below are unaffected.** That area did solve 24/24 at every
+gap out to 8.8 years with 118–443 inliers, and the four-area comparison is
+real. What is wrong is the *name* and the *explanation built on the name*:
+every sentence below reasoning from "crops", "farmland" or "flat open country"
+is reasoning about ground that is not in the tile.
+
+**The corrected finding is narrower and better supported.** The comparison was
+never crops against buildings. It is a **low-rise regional town against four
+high-rise CBDs** — Griffith's centre is one and two storeys — and the
+town matches across 8.8 years while the CBDs fail at months. That isolates
+**building height** as the variable, where "farmland vs city" confounded height
+with whether anything is built at all. The mechanism already stated below —
+facade parallax with view angle, shadow with sun angle — is a mechanism of
+*tall* structures specifically, so it survives, and now has a cleaner
+comparison under it.
+
+**What is lost:** this study contains no measurement over actual open country.
+The claim "farmland survives 8.8 years" is not supported by anything here and
+must not be repeated. If the flight area is farmland, it is untested.
+
+Read everything below with "rural"/"farmland" meaning **low-rise town**.
+
 ## The answer
 
 **The cliff is a property of LAND COVER.** It is not the matcher, and it is not
@@ -26,7 +56,7 @@ Sydney specifically.
 
 | area | result |
 |---|---|
-| **rural (Griffith, NSW farmland)** | **works at every measured gap, out to 8.8 years** |
+| **Griffith, NSW — low-rise town centre** (labelled `rural_griffith`) | **works at every measured gap, out to 8.8 years** |
 | Brisbane CBD | not monotonic — 4 of 8 gaps work |
 | Perth CBD | not monotonic — 3 of 11 gaps work |
 | Melbourne CBD | not monotonic — 1 of 12 gaps work |
@@ -34,9 +64,9 @@ Sydney specifically.
 Every control passed (24/24 solved, 0.011–0.021 m median), so none of the
 failures above is a harness or tile fault.
 
-The rural area is the finding, and it inverts the intuition. Crops change every
-season and buildings do not, so a city ought to be the easy case. It is the
-hard one:
+Griffith is the finding, and it inverts the intuition. A built-up area ought to
+be the stable one -- buildings do not move -- and the tallest built-up areas are
+the hard case:
 
 ```
 rural_griffith   118-443 inliers, 0.02-1.92 m median, 24/24 at every gap
@@ -45,9 +75,10 @@ three CBDs         5-38  inliers, most gaps failing outright
 
 What changes between two satellite passes over a CBD is not the ground — it is
 the **apparent geometry of tall structures**: facade parallax with view angle,
-and shadow with sun angle and season. Flat farmland has neither, so two
-captures eight years apart still align. A high-rise CBD disagrees with itself
-between passes taken months apart.
+and shadow with sun angle and season. **Both scale with height**, so a one- and
+two-storey town centre has very little of either and two captures eight years
+apart still align, while a high-rise CBD disagrees with itself between passes
+taken months apart.
 
 **For this project that is directly actionable.** How stale the reference map
 may be is a question about the flight area, not about the pipeline. The
