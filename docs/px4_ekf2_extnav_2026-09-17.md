@@ -33,15 +33,30 @@ that **rate is easy and latency is the binding constraint**. On PX4 rate is a
 hard gate, and it sits above what most of this pipeline's measured
 configurations achieve.
 
-Swept with a **fresh PX4 boot per rate**, 20 m injected north, 25 s per arm:
+Swept with a **fresh PX4 boot per rate**, 20 m injected north, 25 s per arm.
+The 4–20 Hz band was then repeated twice more, because one sample per rate
+cannot tell a floor from a flake — and the first pass contained exactly such a
+flake:
 
-| inject rate | interval | final drift of 20 m | fused |
-|---|---|---|---|
-| 2 Hz | 500 ms | 0.00 m | no |
-| 3 Hz | 333 ms | −0.01 m | no |
-| 4 Hz | 250 ms | 0.00 m | no |
-| **5 Hz** | **200 ms** | **19.74 m** | **yes** |
-| **6 Hz** | **166 ms** | **20.47 m** | **yes** |
+| inject rate | interval | pass 1 | pass 2 | pass 3 | fused |
+|---|---|---|---|---|---|
+| 2 Hz | 500 ms | 0.00 m | — | — | no |
+| 3 Hz | 333 ms | −0.01 m | — | — | no |
+| 4 Hz | 250 ms | 0.00 m | 0.00 m | −0.01 m | **no** |
+| **5 Hz** | **200 ms** | 19.74 m | 19.96 m | 19.50 m | **yes** |
+| **6 Hz** | **166 ms** | 20.47 m | 19.92 m | 20.27 m | **yes** |
+| **10 Hz** | **100 ms** | *−0.01 m* | 20.28 m | 19.92 m | **yes** |
+| **20 Hz** | **50 ms** | 19.90 m | 19.92 m | 20.26 m | **yes** |
+
+**Pass 1's 10 Hz failure did not reproduce and was noise.** It is left in the
+table rather than deleted, because a single anomalous cell is exactly what
+would have been written up as "the floor is 5 Hz and it also breaks above
+10 Hz" had the band not been repeated. Everything at or above 5 Hz fuses;
+everything below it does not.
+
+5 Hz is 200 ms, the constant itself, and it works because real send jitter puts
+most intervals just under. **Do not design to 5 Hz** — it is the boundary, not
+a margin.
 
 The boundary is not empirical guesswork — it is a named constant:
 
