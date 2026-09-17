@@ -1,0 +1,34 @@
+[
+  {
+    "method": "ripepp",
+    "label": "RIPE++ (MegaDepth)",
+    "query": "/home/sai/GeoAnchor/geoanchor-rt/data/crossdate/brisbane/ref_tile_2025-12-18.tif",
+    "reference": "/home/sai/GeoAnchor/geoanchor-rt/data/crossdate/brisbane/ref_tile_2025-12-18.tif",
+    "query_gsd_m": 0.2644,
+    "reference_gsd_m": 0.2644,
+    "frames": 6,
+    "inliers_median": 112,
+    "inliers_max": 144,
+    "solved": 6,
+    "plausible": 6,
+    "median_error_m": 0.0,
+    "p90_error_m": 0.005,
+    "max_error_m": 0.005
+  },
+  {
+    "method": "edgepoint2_s64",
+    "label": "EdgePoint2 Small (64-D)",
+    "query": "/home/sai/GeoAnchor/geoanchor-rt/data/crossdate/brisbane/ref_tile_2025-12-18.tif",
+    "reference": "/home/sai/GeoAnchor/geoanchor-rt/data/crossdate/brisbane/ref_tile_2025-12-18.tif",
+    "query_gsd_m": 0.2644,
+    "reference_gsd_m": 0.2644,
+    "frames": 6,
+    "inliers_median": 93,
+    "inliers_max": 142,
+    "solved": 6,
+    "plausible": 6,
+    "median_error_m": 0.029,
+    "p90_error_m": 0.039,
+    "max_error_m": 0.039
+  }
+]
