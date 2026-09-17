@@ -20,8 +20,21 @@ import argparse, math, sys, threading, time
 from pymavlink import mavutil
 
 AUTO_MISSION = (4 << 24) | (4 << 16)   # PX4 custom_mode: sub<<24 | main<<16
-LOITER_RADIUS_M = 120.0                # comfortable for a cessna-class fixed wing
-LAND_ANGLE_DEG = 8.0                   # PX4 FW_LND_ANG default
+# ORBIT RADIUS IS A CAMERA PARAMETER, not a comfort one.
+#
+# A coordinated turn banks at tan(phi) = v^2 / (g * r), and the camera is
+# rigidly mounted, so the bank IS the camera's tilt off nadir. At 20 m/s a
+# 120 m orbit banks 19 degrees and the whole pipeline degrades: 387 matches
+# collapsed to 5 inliers with the solved scale 3-9x off, because a steeply
+# oblique view does not relate to a north-up orthorectified map by the
+# near-affine homography the solve expects. 500 m banks 4.7 degrees.
+#
+# This was found by "fixing" a wandering aircraft into a tight orbit and
+# watching acceptance go from 21% to zero.
+#
+# NOTE this value is advisory in DO_REPOSITION: AUTO.LOITER takes its radius
+# from NAV_LOITER_RAD, which configs/px4_sim_fixedwing.params sets to match.
+LOITER_RADIUS_M = 500.0
 
 
 def beat(m):
@@ -154,37 +167,17 @@ def main():
     # sequence half an hour in while someone is reading the dashboard.
     items.append((mavutil.mavlink.MAV_CMD_NAV_LOITER_UNLIM, lat, lon, a.alt,
                   (0.0, 0.0, LOITER_RADIUS_M, 0.0)))
-    # A LANDING ITEM THAT IS NEVER REACHED.
+    # NO LANDING ITEM, and that is a deliberate dependency on
+    # configs/px4_sim_fixedwing.params setting MIS_TKO_LAND_REQ to 0.
     #
-    # This airframe's MIS_TKO_LAND_REQ is 2 -- landing required -- so without
-    # one PX4 accepts the upload, sets mission_result.valid = False, and then
-    # refuses to arm with "Resolve system health failures first". Nothing in
-    # that message mentions the mission; the real reason appears only in
-    # `mission_feasibility_checker` ("Landing waypoint/pattern required") and
-    # in failsafe_flags.auto_mission_missing.
-    #
-    # Satisfying the checker beats relaxing the parameter: it needs no
-    # parameter change, so this works on a stock PX4, and the item is
-    # unreachable behind an unlimited loiter, so the aircraft keeps flying and
-    # the camera keeps producing frames.
-    # LOITER_TO_ALT first: PX4 rejects a fixed-wing landing whose approach
-    # entrance is a plain waypoint -- "unsupported landing approach entrance
-    # waypoint type. Only ORBIT_TO_ALT ...". param1 = 1 means leave the orbit
-    # on the tangent toward the next item, which is what a landing approach
-    # wants.
-    items.append((mavutil.mavlink.MAV_CMD_NAV_LOITER_TO_ALT, lat, lon, a.alt,
-                  (1.0, LOITER_RADIUS_M, 0.0, 0.0)))
-    # ...and the landing point far enough away to satisfy TWO separate checks:
-    #   "the landing point must be outside the orbit radius", and
-    #   "the landing glide slope is steeper than the vehicle setting of 8.0
-    #    degrees" (FW_LND_ANG).
-    # Derive the distance from the glide limit rather than picking a number:
-    # descending `alt` metres at FW_LND_ANG needs alt/tan(angle) of horizontal
-    # run, and 1.3x of that leaves margin for the approach geometry.
-    run_m = max(a.alt / math.tan(math.radians(LAND_ANGLE_DEG)) * 1.3,
-                LOITER_RADIUS_M * 2.0)
-    land_lat = lat - run_m / 111_320.0
-    items.append((mavutil.mavlink.MAV_CMD_NAV_LAND, land_lat, lon, 0.0, NONE))
+    # The alternative -- satisfying the feasibility checker with a real landing
+    # pattern -- works, and then makes the aircraft fly to it. A fixed-wing
+    # landing must clear the loiter radius and the 8-degree FW_LND_ANG glide
+    # limit, which puts the touchdown point alt/tan(8) ~= 740 m away, and PX4
+    # goes there: through an unlimited loiter with autocontinue 0, and through
+    # a commanded AUTO.LOITER. The camera then spends the run 740 m from the
+    # middle of the reference map. Inside a 2.17 km tile that still produces
+    # fixes, so nothing in the numbers reveals it.
 
     print(f"  uploading {len(items)} items, {a.box:.0f} m box at {a.alt:.0f} m AGL")
     for attempt in range(1, 4):
@@ -273,7 +266,36 @@ def main():
             last_report = time.time()
             print(f"  {agl:6.1f} m AGL", flush=True)
         if agl >= a.alt * 0.9:
-            print(f"\n  in the envelope at {agl:.1f} m. Flying the box.")
+            print(f"\n  in the envelope at {agl:.1f} m.")
+            # HOLD OVER THE MAP, and do not trust the mission to do it.
+            #
+            # MAV_CMD_NAV_LOITER_UNLIM with autocontinue 0 is the documented way
+            # to make a mission stop, and on this PX4 it does not: the aircraft
+            # ran on to the landing approach and orbited 750 m from the world
+            # origin instead. That is still inside a 2.17 km tile, so the
+            # pipeline kept working and the bug was invisible in the fix
+            # statistics -- which is exactly why it is worth not relying on.
+            #
+            # DO_REPOSITION plus AUTO.LOITER holds a commanded point regardless
+            # of where the mission thinks it is, so the camera stays over the
+            # middle of the reference map for as long as the rig runs.
+            # COMMAND_INT, not COMMAND_LONG: the long form carries lat/lon in
+            # float32 fields, which quantises a position at this latitude to
+            # roughly a third of a metre. COMMAND_INT carries them as degrees
+            # times 1e7 and is the correct message for anything positional.
+            m.mav.command_int_send(
+                m.target_system, m.target_component,
+                mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+                mavutil.mavlink.MAV_CMD_DO_REPOSITION, 0, 0,
+                -1, 0, LOITER_RADIUS_M, float("nan"),   # radius: advisory
+                int(lat * 1e7), int(lon * 1e7), a.alt)
+            m.mav.command_long_send(
+                m.target_system, m.target_component,
+                mavutil.mavlink.MAV_CMD_DO_SET_MODE, 0,
+                mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,
+                4, 3, 0, 0, 0, 0)          # PX4 main AUTO=4, sub LOITER=3
+            print(f"  holding a {LOITER_RADIUS_M:.0f} m orbit over the map "
+                  f"centre, {lat:.6f} {lon:.6f}")
             return 0
     print("\n  did not reach altitude within 180 s")
     return 1

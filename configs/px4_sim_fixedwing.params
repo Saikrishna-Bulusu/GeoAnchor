@@ -1,0 +1,69 @@
+# Parameters this SIMULATION rig needs that a real aircraft must not have.
+#
+# Applied by scripts/px4_set_params.py from scripts/sim_fixedwing.sh, which
+# saves them, so they survive the reboot-less restarts this rig does.
+
+# name             value   why
+MIS_TKO_LAND_REQ       0   # 0 = a mission needs neither a takeoff nor a
+                           # landing item. Defaults to 2 on this fixed-wing
+                           # airframe, meaning LANDING REQUIRED, and PX4 then
+                           # accepts a mission upload, sets
+                           # mission_result.valid = False, and refuses to arm
+                           # with "Resolve system health failures first" --
+                           # which names neither the mission nor the landing.
+                           # The real reason appears only in
+                           # failsafe_flags.auto_mission_missing and in
+                           # mission_feasibility_checker.
+                           #
+                           # Satisfying the checker instead of relaxing it was
+                           # tried first and is worse HERE: a landing item has
+                           # to clear the orbit radius AND the 8-degree
+                           # FW_LND_ANG glide limit, which puts it alt/tan(8)
+                           # ~= 740 m from the loiter centre. The aircraft then
+                           # flies to it -- through an unlimited loiter with
+                           # autocontinue 0, and through a commanded
+                           # AUTO.LOITER -- and leaves the middle of the
+                           # reference map. On a real aircraft you want the
+                           # landing item; this rig never lands.
+
+NAV_DLL_ACT            0   # no datalink-loss failsafe. Defaults to 2 = RTL,
+                           # and COM_DL_LOSS_T is 10 s, so ten seconds after
+                           # scripts/sim_fly.py finishes and stops heartbeating
+                           # PX4 abandons the commanded loiter and flies RTL.
+                           #
+                           # Over THIS world that is nearly invisible: home is
+                           # the map centre, so RTL orbits exactly the ground
+                           # the pipeline wants, at an altitude inside the
+                           # 50-100 m envelope. The rig looks like it is
+                           # working as designed while actually running a
+                           # failsafe. Watch vehicle_status.nav_state -- 4 is
+                           # AUTO_LOITER and intended, 5 is AUTO_RTL and is
+                           # this bug.
+                           #
+                           # NEVER ON AN AIRCRAFT. Losing the datalink with no
+                           # failsafe is how a real airframe flies away.
+
+NAV_LOITER_RAD     500.0   # metres. Default 80. TWO reasons, both measured.
+                           #
+                           # BANK IS CAMERA TILT. A coordinated turn banks at
+                           # tan(phi) = v^2/(g*r), and the camera is rigidly
+                           # mounted, so the orbit radius sets how far off
+                           # nadir it looks. At 20 m/s: 80 m -> 27 deg, 120 m
+                           # -> 19 deg, 500 m -> 4.7 deg. A steeply oblique
+                           # view does not relate to a north-up orthorectified
+                           # map by the near-affine homography the solve
+                           # expects: 387 matches collapsed to 5 inliers with
+                           # the solved scale 3-9x off.
+                           #
+                           # AND A TIGHT ORBIT SEES ONE PLACE. Matchability
+                           # varies hugely inside this one 2.17 km tile --
+                           # measured against the 2.2-year-older reference,
+                           # 30 inliers over the commercial centre against 96
+                           # over the industrial fringe, with the control
+                           # (matching the ground's own imagery) at 270 in
+                           # both. Parking on the centre parks on the hardest
+                           # ground there is. A 1 km-diameter circle crosses
+                           # centre, suburbs and industry.
+                           #
+                           # DO_REPOSITION's radius argument does not do this:
+                           # AUTO.LOITER takes its radius from here.

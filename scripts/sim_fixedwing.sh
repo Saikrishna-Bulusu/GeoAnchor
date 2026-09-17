@@ -264,9 +264,13 @@ if [ "$CLOSED" = "1" ]; then
   # then exits, leaving PX4 sending telemetry to a socket nobody holds. The
   # symptom is the data layer receiving nothing at all, for the rest of the
   # run. 14280/14030 is a separate instance and costs nothing.
-  .venv/bin/python scripts/px4_set_params.py --file configs/px4_agp.params \
+  # ONE invocation for both files. Two would be one too many: PX4 locks the
+  # instance to the first client's socket, so the second gets "no heartbeat"
+  # and applies nothing while the first still reports success.
+  .venv/bin/python scripts/px4_set_params.py \
+      --file configs/px4_agp.params configs/px4_sim_fixedwing.params \
       --endpoint udpout:127.0.0.1:14280 \
-      2>&1 | sed 's/^/  /'
+      2>&1 | sed -u 's/^/  /'
   if command -v MicroXRCEAgent >/dev/null 2>&1; then
     MicroXRCEAgent udp4 -p 8888 > /tmp/xrce_agent.log 2>&1 &
     PIDS+=($!)

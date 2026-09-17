@@ -130,6 +130,20 @@ from `px4-listener vehicle_global_position` and run any matcher. Measured
 | `ref_tile_2026-08-05.tif` (textures the ground) | **268** | control — camera, projection, rectification and GSD scaling are all correct |
 | `ref_tile_2024-06-06.tif` (the pipeline's map) | **96** | a genuine cross-date match, 2.2 years |
 
+**And where it flies matters more than anything else.** The same check at two
+positions inside this one tile:
+
+| position | vs the ground's own imagery | vs the 2.2-year reference |
+|---|---|---|
+| commercial centre | 270 | **30** |
+| industrial fringe, 800 m south | 268 | **96** |
+
+Flat control column, 3.2x difference across dates. An acceptance rate from this
+rig is a statement about the flight path as much as about the method — parking
+on the town centre takes it to zero with every upstream stage working. That is
+also why `NAV_LOITER_RAD` is 500 m: a tight orbit both banks the camera off
+nadir and samples one patch of ground.
+
 **Centre the crop on the aircraft, not on the tile.** The first version of this
 check cropped the tile centre while the aircraft was 794 m away, got 5 inliers
 against *both* tiles — including the one the ground is literally textured with —
@@ -259,8 +273,9 @@ bash scripts/sim_fixedwing.sh --no-fly       # leave it on the ground for QGC
 
 Seven steps:
 
-0. **preconditions** — resolve the real `gz`, refuse ground == reference, read
-   the world origin out of the SDF and hand it to PX4 as home.
+0. **preconditions** — refuse to start on top of a live run, resolve the real
+   `gz`, refuse ground == reference, read the world origin out of the SDF and
+   hand it to PX4 as home.
 1. **Gazebo** — start the world, wait for topics.
 2. **PX4 SITL** — `PX4_SYS_AUTOSTART=4003` (rc_cessna), spawning
    `geoanchor_cessna` into `geoanchor_rural`.
@@ -269,7 +284,10 @@ Seven steps:
    carries no pixels.
 4. **the pipeline** — all three layers, on the Gazebo feed.
 5. **the AGP write path** — parameters, agent, bridge.
-6. **launch** — mission upload, arm, climb into the envelope.
+6. **launch** — mission upload, arm, climb into the envelope, then hold a
+   120 m orbit over the map centre. The orbit is commanded with
+   `DO_REPOSITION` + `AUTO.LOITER` rather than left to the mission's own
+   `LOITER_UNLIM`, which this PX4 runs straight past.
 7. **running** — dashboard at `http://localhost:8000`.
 
 ### Why the runner waits for `Startup script returned successfully`
@@ -307,8 +325,20 @@ pipeline  --ZeroMQ-->  scripts/agp_bridge.py  --ROS 2-->  /fmu/in/aux_global_pos
 1, sets `eph` to `max(sigma, EKF2_AGP_NOISE)`, and stamps `timestamp_sample`
 with the **capture** time, never the fix-completion time.
 
-Parameters go in from `configs/px4_agp.params`, applied at runtime by
+Parameters go in from `configs/px4_agp.params` and
+`configs/px4_sim_fixedwing.params`, applied at runtime by
 `scripts/px4_set_params.py` on top of the stock `4003` (rc_cessna) airframe.
+**Both files go to one invocation** — `--file a b` — because PX4 locks a
+mavlink instance to the first peer and a second invocation gets `no heartbeat`
+and applies nothing while the first still reports success.
+
+`configs/px4_sim_fixedwing.params` holds two settings that are correct for a
+simulator and **wrong for an aircraft**:
+
+| param | value | why, and why only here |
+|---|---|---|
+| `MIS_TKO_LAND_REQ` | 0 | no landing item required. With the default 2, a landing item must clear both the loiter radius and the 8° `FW_LND_ANG` glide limit, which puts it ~740 m from the loiter centre — and PX4 then flies there, taking the camera off the middle of the map. A real aircraft wants the landing item. |
+| `NAV_DLL_ACT` | 0 | no datalink-loss failsafe. The default RTL fires 10 s after `sim_fly.py` exits. On a real airframe, no failsafe is how you lose it. |
 
 There is deliberately **no custom PX4 airframe file.** One existed and was
 removed: it set the same four parameters a second time, which means two places
@@ -388,7 +418,9 @@ something you can see rather than something you have to read about.
 | no image topic | `gz topic -l | grep /image$`. If `camera_info` exists but `image` does not, Gazebo is still loading the texture. |
 | centimetre errors | the ground and the reference have become the same file. The runner refuses this, but only if both are passed through it. |
 | few inliers, `prior=cold`, `scale N is more than 0.35 from 1.0` | the aircraft is not over the ground the tile search is looking at. Check `vehicle_global_position` against the world origin before suspecting the matcher. |
-| the aircraft flies away and lands | `autocontinue` was set on the unlimited loiter, so PX4 walks through it into the approach. `sim_fly.py` sets it to 0 for that one item. |
+| the aircraft drifts off the map centre | a landing item has to sit `alt/tan(FW_LND_ANG)` ≈ 740 m away, and PX4 flies to it — through an unlimited loiter with `autocontinue: 0` and through a commanded `AUTO.LOITER`. The rig sets `MIS_TKO_LAND_REQ 0` so the mission needs no landing item at all. |
+| `vehicle_status.nav_state` is 5, not 4 | that is `AUTO_RTL`, a datalink-loss failsafe firing 10 s after `sim_fly.py` exits and stops heartbeating. Over this world home *is* the map centre, so it looks correct. `NAV_DLL_ACT 0` in the sim params turns it off. |
+| `no heartbeat` from `px4_set_params.py` | a second invocation against a port PX4 has already locked to the first. Pass every file to one invocation: `--file a.params b.params`. |
 | `cs_aux_gpos` stays False with everything else healthy | the AGP bridge is not running. It needs **both** ROS (`rclpy`, `px4_msgs`) and the venv (`zmq`, `geoanchor`); `.venv/bin/python` fails on `rclpy` and bare `python3` on `zmq`. Read `/tmp/agp_bridge.log`. |
 | `ModuleNotFoundError: gz` | `sudo apt install python3-gz-transport13 python3-gz-msgs10`. Do not set `PYTHONPATH` — see above. |
 | `cannot import name 'Sentinel' from 'typing_extensions'` | something put the system dist-packages on `PYTHONPATH`, ahead of the venv. |

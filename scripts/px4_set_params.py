@@ -82,7 +82,11 @@ def parse(path):
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--endpoint", default="udpout:127.0.0.1:14580")
-    ap.add_argument("--file", required=True)
+    # REPEATABLE, because one process must carry every file. PX4's UDP mavlink
+    # locks to one peer per instance, so a second invocation against the same
+    # port gets "no heartbeat" and applies nothing -- silently, since the first
+    # one reported success. Merging the files into one connection avoids it.
+    ap.add_argument("--file", required=True, nargs="+")
     ap.add_argument("--timeout", type=float, default=20.0)
     ap.add_argument("--no-save", action="store_true",
                     help="skip the PREFLIGHT_STORAGE save (parameters then last "
@@ -90,8 +94,13 @@ def main() -> int:
     a = ap.parse_args()
 
     from pymavlink import mavutil
-    want = parse(a.file)
-    print(f"applying {len(want)} parameters from {a.file}")
+    want = {}
+    for path in a.file:
+        for name, spec in parse(path).items():
+            if name in want and want[name] != spec:
+                print(f"  NOTE {name} set twice, {path} wins")
+            want[name] = spec
+    print(f"applying {len(want)} parameters from {', '.join(a.file)}")
 
     conn = mavutil.mavlink_connection(a.endpoint, source_system=255)
     conn.mav.heartbeat_send(6, 8, 0, 0, 0)

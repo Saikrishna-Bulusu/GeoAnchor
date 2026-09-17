@@ -12,7 +12,7 @@ Reproduce: `bash scripts/sim_fixedwing.sh`. Full setup in `sim/README.md`.
 |---|---|
 | aircraft | PX4 v1.16.2 SITL, `rc_cessna` fixed wing, nadir `mono_cam` |
 | simulator | Gazebo Harmonic 8.15.0, real-time factor 1.0 |
-| flight | 400 m box then unlimited loiter, 72-94 m AGL |
+| flight | 400 m box, then a 500 m-radius orbit over the map centre, 72-94 m AGL |
 | ground texture | Esri Wayback **2026-08-05** over Griffith NSW, 0.4926 m/px |
 | reference map | Esri Wayback **2024-06-06**, same ground, **2.2 years older** |
 | matcher | `edgepoint2_s64`, 2048 keypoints, inlier gate 8 |
@@ -25,7 +25,9 @@ system test.
 
 ## Result
 
-2986 frames published, **638 accepted fixes (21%)**.
+2986 frames published, **638 accepted fixes (21%)**. The aircraft was over the
+industrial fringe for this run — see "where it flies" below, which is not a
+detail.
 
     error   median      7.02 m
             p90         8.39 m
@@ -126,6 +128,60 @@ recording.
 And one that was not a bug: **five inliers against the tile the ground is
 literally textured with** meant the diagnostic crop was centred on the tile
 while the aircraft was 794 m away. Centred correctly it gave 268 inliers
-against that tile and 96 across the 2.2-year gap. The aircraft was 794 m away
-because `autocontinue` was set on the unlimited loiter, so PX4 walked through
-it into the landing approach.
+against that tile and 96 across the 2.2-year gap.
+
+## Where it flies changes the answer more than anything else does
+
+Measured after the run above, one live frame against 800 px crops of both tiles
+at two positions **inside the same 2.17 km tile**, plain ORB:
+
+| position | vs the ground's own imagery | vs the 2.2-year-older reference |
+|---|---|---|
+| commercial centre | 270 | **30** |
+| industrial fringe, 800 m south | 268 | **96** |
+
+The control column is flat, so the camera, projection, rectification and GSD
+scaling are equally correct in both places. The cross-date column is not: the
+commercial core is **3.2x harder** across 2.2 years than the industrial fringe
+800 m away. Cars, awnings, street trees and a market change; big roofs and
+yards do not.
+
+That is the land-cover effect from
+`results/crossdate_cities_2026-09-17.md` reappearing **within a single tile**,
+at a scale far below the one that study compares. It also means an acceptance
+rate from this rig is a statement about the flight path as much as about the
+method — parking the aircraft on the town centre, which an unlucky loiter did,
+takes acceptance to zero while every upstream stage is working perfectly.
+
+**So the orbit radius is a camera parameter and a sampling parameter at once.**
+A coordinated turn banks at `tan(phi) = v^2 / (g * r)` and the camera is
+rigidly mounted, so the radius sets how far off nadir it looks: at 20 m/s, 80 m
+gives 27 degrees, 120 m gives 19, 500 m gives 4.7. A steeply oblique view does
+not relate to a north-up orthorectified map by the near-affine homography the
+solve expects — 387 matches collapsed to 5 inliers with the solved scale 3-9x
+off. And a tight orbit samples one patch of ground. `NAV_LOITER_RAD` is set to
+500 m for both reasons; `DO_REPOSITION`'s radius argument is advisory and
+`AUTO.LOITER` takes its radius from the parameter.
+
+## The loiter, and a fix that did not work
+
+The aircraft was 794 m from the origin because it ran past the unlimited loiter
+into the landing approach that exists only to satisfy the feasibility checker.
+Setting `autocontinue` to 0 on that item is the documented way to make a
+mission stop, and **on this PX4 it did not**: sampled five times over a minute,
+`seq_current` stayed at 8 — the landing item — with the aircraft orbiting
+730-790 m south at 93 m.
+
+It was caught only because a background check printed a position that
+contradicted a claim already written down. **Nothing in the fix statistics
+showed it**: 750 m is still well inside a 2168 m tile, so the camera was over
+mapped ground the whole time and the numbers above were produced under it. A
+flight-path bug that keeps the aircraft over the map is invisible to every
+measurement this rig makes.
+
+The working version does not rely on mission-item semantics at all:
+`MAV_CMD_DO_REPOSITION` to the map centre followed by `AUTO.LOITER`, which
+holds a commanded point regardless of what the mission thinks it is doing.
+Sent as `COMMAND_INT` — the `COMMAND_LONG` form carries lat/lon in float32
+fields, which quantises a position at this latitude to about a third of a
+metre.
