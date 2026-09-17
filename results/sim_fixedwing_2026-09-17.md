@@ -25,20 +25,19 @@ system test.
 
 ## Result
 
-1766 frames published, **481 accepted fixes (27%)**.
+2986 frames published, **638 accepted fixes (21%)**.
 
-    error   median      6.60 m
-            p90         7.86 m
-            p99        11.97 m
+    error   median      7.02 m
+            p90         8.39 m
+            p99        12.55 m
             max        14.82 m
-            within  5 m  16%
             within 10 m  98%
             within 20 m 100%
 
     inliers median 75, range 13-190
     latency median 63.2 ms, p95 97.6 ms   (budget 250 ms)
 
-**No catastrophes.** The worst fix of 481 is 14.82 m. Every satellite run on
+**No catastrophes.** The worst fix of 638 is 14.82 m. Every satellite run on
 real AnyVisLoc data in this project contains fixes wrong by hundreds of metres
 and some by more than a kilometre; this one has none. That is a statement about
 the simulator, not about the method — a rendered view of a flat textured plane
@@ -66,13 +65,20 @@ the one measured on the target board.
 emitted is the proof the covariance survived the whole path rather than being
 replaced by a default somewhere in it.
 
-**The acceptance rate is the thing to watch, not the error.** 27% of frames at
-~10 fps published is about 2.7 Hz of accepted fixes, which clears AGP's 5 s
-timeout comfortably. Earlier in the same run, while the aircraft was still
-transiting, acceptance was 6.3% — about 0.63 Hz — and `cs_aux_gpos` dropped to
-False between fixes. The aid source is only continuous while the gate is
-passing often enough, so a rejection streak walks the estimator toward timeout
-exactly as `CLAUDE.md` warns for ArduPilot's `posTestRatio`.
+**The acceptance rate is the thing to watch, not the error.** 21% of frames at
+~10 fps published is about 2 Hz of accepted fixes. That clears AGP's 5 s
+timeout on average — but only on average: `cs_aux_gpos` was sampled True six
+times running at one point in the loiter and False at another, because
+acceptance is bursty and a rejection streak longer than 5 s drops the aid
+source. Early in the same run, while the aircraft was still transiting,
+acceptance was 6.3% — about 0.63 Hz — and it dropped out regularly.
+
+**So the useful output of this rig is not the median error, it is the
+continuity of the aid source.** A rejection streak walks the estimator toward
+timeout while data is still arriving on time, exactly as `CLAUDE.md` warns for
+ArduPilot's `posTestRatio`. Measuring the distribution of gaps between accepted
+fixes, against AGP's 5 s and ArduPilot's 7 s, is the experiment this rig now
+makes possible and the obvious next one to run.
 
 ## What this run does not show
 
