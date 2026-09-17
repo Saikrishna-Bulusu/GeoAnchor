@@ -99,6 +99,57 @@ area shares a resolution, a sensor family and a projection — which is why the
 land-cover conclusion above stands. It is the cross-area comparison of absolute
 inlier counts that needs resampling to a common GSD before it means anything.
 
+### 3. Every tile in this study is upsampled, and the georeferencing error is the same size as the signal
+
+`results/wayback_source_meta.json`, read from Esri's own per-release metadata
+services. Sydney and Melbourne resolved before the service began rate-limiting;
+the other three need a re-run after a cooldown.
+
+**Sydney CBD** — 7 distinct acquisitions, not the 13 "distinct captures" the
+tile-hash method counts:
+
+| acquired | native m | sampled m | stated acc m | sensor |
+|---|---|---|---|---|
+| 2013-02-07 | 0.50 | 0.50 | 10.00 | Pleiades |
+| 2016-08-10 | 0.31 | 0.31 | 4.23 | WV03_VNIR |
+| 2020-06-16 | 0.46 | 0.31 | 4.23 | GE01 |
+| 2021-05-12 | 0.50 | 0.31 | 4.23 | WV02 |
+| 2022-04-19 | 0.50 | 0.30 | 5.00 | WV02 |
+| 2023-02-05 | 0.30 | 0.30 | 2.00 | WV03 |
+| 2025-10-02 | 0.31 | 0.15 | 8.47 | WV03 |
+
+**Melbourne CBD** — 5 distinct acquisitions, native 0.46–0.50 m, all
+WorldView-2 / GeoEye-1 / Pleiades.
+
+Three things fall out of this, and they matter more than the resolution
+confound described above.
+
+**The tile-hash method over-counts captures.** Sydney's 13 "distinct captures"
+are 7 acquisitions. Different Wayback releases can render the same underlying
+imagery differently — reprocessing, reprojection, recompression — so several
+"gaps" in the original curve compare one acquisition against itself, rendered
+twice. Those are not cross-date measurements at all.
+
+**Everything here is upsampled.** The native source is 0.30–0.50 m everywhere,
+and these tiles are fetched at zoom 19 = 0.24 m/px. There is no real detail
+below ~0.3 m in any capture in this study — the matcher is working on
+interpolated pixels throughout. That also settles the cross-city resolution
+worry in the other direction: Sydney and Melbourne share sensors (WV02, WV03,
+GE01, Pleiades) and native resolution to within 0.04 m, so **the land-cover
+conclusion is not a resolution artefact.** Same sensors, same resolution,
+wildly different cross-date behaviour — it is the ground.
+
+**The stated horizontal accuracy is 2–10 m.** That is the same order as the
+cross-date errors being measured, and larger than most of them. A 3.34 m median
+"error" at a short gap is at or below the georeferencing uncertainty of the two
+captures being compared, so **a substantial part of what this curve measures is
+the two images disagreeing about where they are, not the matcher failing.**
+Solve *rate* and inlier count remain clean signals; the metre values do not,
+and should be read as an upper bound on matcher error rather than as matcher
+error.
+
+This applies to `results/crossdate_wayback_curve.md` too.
+
 ## Per-area tables
 
 

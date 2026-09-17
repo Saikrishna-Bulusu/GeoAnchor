@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -56,11 +57,32 @@ AREAS = {
 }
 
 
-def services(timeout=60):
-    with urllib.request.urlopen(f"{ROOT}?f=json", timeout=timeout) as r:
-        d = json.load(r)
-    return [s["name"] for s in d.get("services", [])
-            if s["name"].startswith("World_Imagery_Metadata_")]
+_SERVICES_CACHE = []
+
+
+def services(timeout=60, retries=4):
+    """The metadata service names, fetched ONCE and retried.
+
+    This is ~200 names and it does not change during a run, but it was being
+    re-fetched per area -- and the server rate-limits after a few hundred
+    requests, so the third area died on `RemoteDisconnected` after the first
+    two had succeeded. Cached and retried with a backoff.
+    """
+    if _SERVICES_CACHE:
+        return _SERVICES_CACHE
+    last = None
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(f"{ROOT}?f=json", timeout=timeout) as r:
+                d = json.load(r)
+            _SERVICES_CACHE.extend(
+                s["name"] for s in d.get("services", [])
+                if s["name"].startswith("World_Imagery_Metadata_"))
+            return _SERVICES_CACHE
+        except Exception as exc:
+            last = exc
+            time.sleep(2 ** attempt)
+    raise RuntimeError(f"could not list metadata services after {retries} tries: {last}")
 
 
 def identify(service, lat, lon, timeout=30):
@@ -95,7 +117,7 @@ def _f(v):
         return None
 
 
-def history(lat, lon, workers=16):
+def history(lat, lon, workers=8):
     """Distinct acquisitions under a point, oldest first."""
     svcs = services()
     rows = []
@@ -135,7 +157,14 @@ def main() -> int:
 
     doc = {}
     for name, (lat, lon) in targets.items():
-        rows, n_svc, n_hit = history(lat, lon)
+        # One area failing must not lose the ones already resolved: this takes
+        # tens of minutes and the server rate-limits.
+        try:
+            rows, n_svc, n_hit = history(lat, lon)
+        except Exception as exc:
+            print(f"\n{name}: FAILED ({type(exc).__name__}: {exc})")
+            doc[name] = {"lat": lat, "lon": lon, "error": str(exc)}
+            continue
         doc[name] = {"lat": lat, "lon": lon, "services_probed": n_svc,
                      "services_answering": n_hit, "acquisitions": rows}
         print(f"\n\033[1m{name}\033[0m  {lat:.5f}, {lon:.5f}   "
@@ -150,6 +179,13 @@ def main() -> int:
         res = [r["src_res_m"] for r in rows if r["src_res_m"]]
         if res:
             print(f"  native resolution spans {min(res):g} to {max(res):g} m here")
+        acc = [r["src_acc_m"] for r in rows if r["src_acc_m"]]
+        if acc:
+            print(f"  stated horizontal accuracy {min(acc):g} to {max(acc):g} m "
+                  f"-- the same order as the cross-date errors being measured")
+        if a.json:                      # incremental, so a crash keeps this
+            with open(a.json, "w") as f:
+                json.dump(doc, f, indent=2)
 
     if len(doc) > 1:
         print("\n\033[1mNative source resolution by area\033[0m  "

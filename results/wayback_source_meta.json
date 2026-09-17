@@ -1,0 +1,103 @@
+{
+  "sydney": {
+    "lat": -33.8688,
+    "lon": 151.2093,
+    "services_probed": 196,
+    "services_answering": 64,
+    "acquisitions": [
+      {
+        "src_date": "20130207",
+        "src_res_m": 0.5,
+        "samp_res_m": 0.5,
+        "src_acc_m": 10.0,
+        "sensor": "Pleiades"
+      },
+      {
+        "src_date": "20160810",
+        "src_res_m": 0.31,
+        "samp_res_m": 0.31,
+        "src_acc_m": 4.23,
+        "sensor": "WV03_VNIR"
+      },
+      {
+        "src_date": "20200616",
+        "src_res_m": 0.46,
+        "samp_res_m": 0.31,
+        "src_acc_m": 4.23,
+        "sensor": "GE01"
+      },
+      {
+        "src_date": "20210512",
+        "src_res_m": 0.5,
+        "samp_res_m": 0.31,
+        "src_acc_m": 4.23,
+        "sensor": "WV02"
+      },
+      {
+        "src_date": "20220419",
+        "src_res_m": 0.5,
+        "samp_res_m": 0.3,
+        "src_acc_m": 5.0,
+        "sensor": "WV02"
+      },
+      {
+        "src_date": "20230205",
+        "src_res_m": 0.3,
+        "samp_res_m": 0.3,
+        "src_acc_m": 2.0,
+        "sensor": "WV03"
+      },
+      {
+        "src_date": "20251002",
+        "src_res_m": 0.31,
+        "samp_res_m": 0.15,
+        "src_acc_m": 8.47,
+        "sensor": "WV03"
+      }
+    ]
+  },
+  "melbourne": {
+    "lat": -37.818,
+    "lon": 144.967,
+    "services_probed": 196,
+    "services_answering": 36,
+    "acquisitions": [
+      {
+        "src_date": "20130831",
+        "src_res_m": 0.5,
+        "samp_res_m": 0.5,
+        "src_acc_m": 10.0,
+        "sensor": "Pleiades"
+      },
+      {
+        "src_date": "20150221",
+        "src_res_m": 0.5,
+        "samp_res_m": 0.5,
+        "src_acc_m": 4.23,
+        "sensor": "WV02"
+      },
+      {
+        "src_date": "20170307",
+        "src_res_m": 0.5,
+        "samp_res_m": 0.5,
+        "src_acc_m": 4.23,
+        "sensor": "WV02"
+      },
+      {
+        "src_date": "20210603",
+        "src_res_m": 0.5,
+        "samp_res_m": 0.31,
+        "src_acc_m": 4.23,
+        "sensor": "WV02"
+      },
+      {
+        "src_date": "20220303",
+        "src_res_m": 0.46,
+        "samp_res_m": 0.3,
+        "src_acc_m": 5.0,
+        "sensor": "GE01"
+      }
+    ]
+  },
+  "_note": "Sydney and Melbourne only. Esri's metadata service rate-limits after a few hundred identify calls and refused the service listing for the remaining areas; re-run scripts/wayback_source_meta.py --areas brisbane,perth,rural_griffith after a cooldown."
+}
