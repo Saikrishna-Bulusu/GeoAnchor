@@ -1869,6 +1869,79 @@ truth.
 `sync_logs.sh` also grew a 32 MB per-run size guard -- one looping replay had
 reached 402 MB across 337k JSONL lines, which in git is permanent.
 
+## 17 Sept, later: PX4 solved a different way, and the estimator is exported
+
+### PX4's rate floor is the EV path's, not PX4's. Use Aux Global Position.
+
+`docs/px4_ekf2_extnav_2026-09-17.md`, `results/px4_agp_e2e_2026-09-17.md`.
+EKF2's **Aux Global Position** aid source has no interval check at all -- its
+starting condition is finite lat/lon plus yaw alignment, and the only timing
+rule is a **5 second** timeout against the EV path's 200 ms. PX4's own AGP
+simulator runs at 2 Hz, below the EV floor. Verified: AGP at 2 Hz with GNSS
+denied holds the estimate, `fused: true`.
+
+**It also fits this pipeline far better.** `aux_global_position` is a
+`VehicleGlobalPosition`: lat/lon in degrees, and `eph` as ONE SCALAR standard
+deviation in metres -- exactly what the geodetic stage and the covariance
+estimator already produce. No 21-float array, so no per-axis-versus-summed
+ambiguity; no local frame, so no LOCAL_FRD/LOCAL_NED rotation and no origin to
+keep in step. Every trap in the EV section disappears.
+
+Proven end to end, nothing stubbed: processing layer -> ZeroMQ ->
+`scripts/agp_bridge.py` -> MicroXRCEAgent -> uxrce_dds_client -> EKF2.
+`observation_variance [64.0, 64.0]` came back for an `eph` of 8.0 m, and
+`cs_aux_gpos: True`.
+
+**The cost is uXRCE-DDS**: `/fmu/in/aux_global_position` has no MAVLink
+message, so it needs a DDS participant -- ROS 2 Jazzy and `px4_msgs`, built at
+`~/GeoAnchor/ros2_ws`. **The bridge is a bridge, not a layer**: it subscribes
+to the processing layer's PUB socket exactly as `geoanchor/api` does, nothing
+in `geoanchor/` imports it, and a board flying ArduPilot never runs it. That is
+what keeps "no ROS in the pipeline" true.
+
+**The MAVLink fallback also works.** Padding the EV stream -- compute slowly,
+re-send the most recent fix -- fuses: a 2.4 Hz fix stream sent at 8 Hz gives
+20.27 m of 20, where 2.4 Hz alone gives -0.01. `watch_extnav.py --rate 8
+--fix-rate 2.4`. It needs no new stack and keeps all three EV traps.
+
+### The learned covariance estimator is exported
+
+`scripts/train_covariance.py`, `results/covariance_export_2026-09-17.md`. The
+`Learned` backend had no model, so every flight ran `gate_only`. Out-of-fold,
+binned by predicted sigma:
+
+    XFEAT_STAR   8.1->7.3  12.0->11.9  16.4->16.4  33.2->29.6   spearman 0.581
+    XFEAT_MNN    6.5->6.9  12.0->11.8  19.3->16.7  35.7->25.9   spearman 0.551
+    XFEAT_LG     6.9->6.9   9.0->11.4  10.9-> 9.9  21.1->20.7   spearman 0.399
+
+Monotone over a 4x range; leave-one-scene-out ratios 0.73-1.42 against Eq. 7's
+2.4x understatement. **Spearman varying 0.399-0.581 across three matchers of
+the SAME FAMILY** is the descriptor-specificity finding from the other side.
+
+**The default stays `gate_only`.** These models are XFeat-family and the
+runtime's default matcher is `edgepoint2_s64`; applying one to the other is
+exactly the failure THE FINDING describes, and shipping it would be
+self-refuting. An EdgePoint2 model needs harness runs with EdgePoint2 --
+`s8_train` has XFeat only.
+
+### env80 is Scene_09 + Scene_10 by construction, and no scene fixes it
+
+`results/scene_availability_2026-09-17.md`. **Scene_20 delivers 0 env80 frames**
+(it flies at 93-123 m) and **Scene_13 cannot deliver any** -- step20's own
+priors table says 113-126 m, zero overlap with the envelope. That download is
+not worth starting.
+
+The naive overlap estimate over-predicts by **6.1x** across the seven
+downloaded scenes. And what binds is the VIEW ANGLE, not altitude: of frames
+already inside 50-100 m, 30% of Scene_10's and 20% of Scene_09's reach 80
+degrees, against **4%** for Scene_16 and Scene_22 -- both squarely inside the
+altitude band and both flown oblique. Scene_09 and Scene_10 are unusual in
+flying near-nadir at all.
+
+So the estimator's single-scene tail dependence is **not fixable by adding
+scenes from AnyVisLoc**. Relax the envelope and report the domain shift, or
+use different data.
+
 ## Open, in order
 
 1. **Get an altitude source onto the live-camera rig.** With intrinsics
