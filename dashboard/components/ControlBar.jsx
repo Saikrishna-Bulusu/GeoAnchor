@@ -1,6 +1,6 @@
 'use client';
-import { useState } from 'react';
-import { postControl } from '@/lib/api';
+import { useEffect, useState } from 'react';
+import { getJSON, postControl, uploadMap } from '@/lib/api';
 
 const FIRMWARES = [
   { id: 'ardupilot', label: 'ArduPilot (EKF3)' },
@@ -12,6 +12,7 @@ const FEEDS = [
   { id: 'uvc', label: 'USB camera (live)' },
   { id: 'rtsp', label: 'Network stream' },
   { id: 'env80', label: 'AnyVisLoc env80 (dataset)' },
+  { id: 'gz', label: 'Gazebo camera (simulation)' },
 ];
 const LOOPS = [
   { id: 'off', label: 'Off — nothing sent' },
@@ -22,6 +23,11 @@ const LOOPS = [
 export default function ControlBar({ layers, methods, disabled, loopMode, Panel }) {
   const [busy, setBusy] = useState(null);
   const [err, setErr] = useState(null);
+  const [cov, setCov] = useState(null);       // /api/covariance
+  const [mapInfo, setMapInfo] = useState(null);
+
+  const loadCov = () => getJSON('/api/covariance').then(setCov).catch(() => setCov(null));
+  useEffect(() => { loadCov(); }, [layers?.processing?.status?.config?.method]);
 
   // Two of these controls ask before they apply, and the design marks them
   // "confirms" on the label so it is visible BEFORE the click rather than
@@ -166,6 +172,73 @@ export default function ControlBar({ layers, methods, disabled, loopMode, Panel 
             </select>
           </div>
 
+          {/* THE COVARIANCE BACKEND, and the reason it is a labelled choice
+              rather than a toggle. `gate_only` emits a fixed sigma and says so
+              in every record. `learned` emits metres from a trained model --
+              but a model is trained on ONE matcher, and this project's central
+              finding is that a system which swaps matchers silently inherits a
+              covariance model that no longer works. So every model shows what
+              it was trained on, and a mismatch is called out before it is
+              applied, not after. */}
+          <div className="field">
+            <label className="label" htmlFor="covb">Covariance</label>
+            <select id="covb" disabled={disabled || busy === 'processing'}
+                    value={cov?.current?.backend || pl.covariance?.backend || 'gate_only'}
+                    onChange={async (e) => {
+                      const b = e.target.value;
+                      await send('processing', {
+                        cmd: 'set', path: 'processing_layer.covariance.backend', value: b });
+                      loadCov();
+                    }}>
+              <option value="gate_only">Fixed placeholder (gate_only)</option>
+              <option value="learned" disabled={!cov?.models?.length}>
+                Learned estimator{cov?.models?.length ? '' : ' (no model on disk)'}
+              </option>
+            </select>
+            {(cov?.current?.backend || pl.covariance?.backend) !== 'learned' && (
+              <span className="note">
+                A constant, labelled a placeholder in every record. Honest, and not calibrated
+                against measured error.
+              </span>
+            )}
+          </div>
+
+          {(cov?.current?.backend || pl.covariance?.backend) === 'learned' && (
+            <div className="field">
+              <label className="label" htmlFor="covm">Covariance model</label>
+              <select id="covm" disabled={disabled || busy === 'processing'}
+                      value={cov?.current?.model_path || ''}
+                      onChange={async (e) => {
+                        await send('processing', {
+                          cmd: 'set', path: 'processing_layer.covariance.model_path',
+                          value: e.target.value });
+                        loadCov();
+                      }}>
+                <option value="">select a model</option>
+                {(cov?.models || []).map((m) => (
+                  <option key={m.path} value={m.path}>
+                    {m.name} — trained on {m.trained_on}{m.matches_current ? '' : ' (MISMATCH)'}
+                  </option>
+                ))}
+              </select>
+              {(() => {
+                const m = (cov?.models || []).find((x) => x.path === cov?.current?.model_path);
+                if (!m) return <span className="note">No model selected; the layer falls back to the placeholder.</span>;
+                if (!m.matches_current) {
+                  return (
+                    <span className="note" style={{ color: 'var(--warn)' }}>
+                      This model was trained on <b>{m.trained_on}</b> and the matcher is{' '}
+                      <b>{cov?.current_method}</b>. Eq. 7 collapsing across descriptors is this
+                      project&rsquo;s own finding; a learned model is no different. Expect the
+                      metres to be wrong.
+                    </span>
+                  );
+                }
+                return <span className="note">{m.validation}. n={m.n_train}.</span>;
+              })()}
+            </div>
+          )}
+
           <div className="field">
             <label className="label" htmlFor="loss">Loss</label>
             <select id="loss" disabled={disabled} value={ol.loss || 'nll'}
@@ -174,6 +247,60 @@ export default function ControlBar({ layers, methods, disabled, loopMode, Panel 
               <option value="l2">L2 (squared error)</option>
             </select>
           </div>
+        </div>
+
+        {/* THE REFERENCE MAP, uploaded the way an operator does it on the
+            ground: point the system at imagery of where it is about to fly.
+            Two steps, and the second is the expensive one -- the store holds
+            descriptors for the whole map and is built once here rather than
+            per frame in the air.
+
+            The georeference is reported back because the failure that matters
+            is silent: a plain image with a .tif extension loads without error
+            and then matches against nothing. */}
+        <div style={{ marginTop: 16, borderTop: '1px solid var(--line)', paddingTop: 13 }}>
+          <span className="kicker">Reference map</span>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 7 }}>
+            <input type="file" id="mapfile" accept=".tif,.tiff,.png,.jpg,.jpeg"
+                   disabled={disabled || busy === 'map'}
+                   onChange={async (e) => {
+                     const f = e.target.files?.[0];
+                     if (!f) return;
+                     setBusy('map'); setErr(null); setMapInfo(null);
+                     try {
+                       const info = await uploadMap(f);
+                       setMapInfo(info);
+                     } catch (ex) { setErr(String(ex.message || ex)); }
+                     finally { setBusy(null); }
+                   }} />
+            <button className="btn amber"
+                    disabled={disabled || !mapInfo?.path || busy === 'data' || !mapInfo?.projected}
+                    onClick={() => setPending({
+                      kind: 'map', value: mapInfo.path,
+                      text: `Use "${mapInfo.path}" as the reference map and rebuild the feature `
+                          + 'store. That is one pass of the detector over the whole map, so it '
+                          + 'takes as long as the map is large, and fixes stop until it is done.',
+                      apply: async () => {
+                        await send('data', { cmd: 'set', path: 'data_layer.map.source', value: mapInfo.path });
+                        await send('data', { cmd: 'rebuild_map' });
+                      },
+                    })}>
+              Use this map
+            </button>
+            <span className="meta">current: <code>{dl.map?.source || '--'}</code></span>
+          </div>
+
+          {mapInfo && (
+            <p className="note" style={{ marginTop: 9, color: mapInfo.projected ? undefined : 'var(--bad)' }}>
+              {mapInfo.projected ? (
+                <>Uploaded <code>{mapInfo.path}</code> &mdash; {mapInfo.width}&times;{mapInfo.height} px,
+                  {' '}{mapInfo.crs}, {Number(mapInfo.gsd_m_px).toFixed(4)} m/px. Ready to use.</>
+              ) : (
+                <>{mapInfo.warning || 'This file carries no projected CRS.'} The pipeline needs a
+                  UTM GeoTIFF; it will not be accepted.</>
+              )}
+            </p>
+          )}
         </div>
 
         {pending && (

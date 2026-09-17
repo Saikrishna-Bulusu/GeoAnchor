@@ -403,7 +403,17 @@ class GzFeed(Feed):
     _DEAD_AFTER_S = 5.0        # generous: Gazebo stalls while it loads a world
 
     def __init__(self, topic: str, timeout_s: float = 30.0):
-        import threading
+        import sys, threading
+        # gz-transport ships as APT packages under the SYSTEM dist-packages and
+        # a venv does not see them. APPEND, never prepend, and never via
+        # PYTHONPATH: that env var goes in FRONT of the venv's site-packages,
+        # so the system typing_extensions shadows the venv's and pydantic dies
+        # on `cannot import name 'Sentinel'` -- taking fastapi, and with it the
+        # dashboard, down with it. Appending here leaves venv packages winning
+        # and asks nothing of the caller.
+        _apt = "/usr/lib/python3/dist-packages"
+        if _apt not in sys.path:
+            sys.path.append(_apt)
         try:
             from gz.transport13 import Node
             from gz.msgs10.image_pb2 import Image as GzImage
@@ -414,7 +424,8 @@ class GzFeed(Feed):
                 "  They are APT packages and this venv does not see them by "
                 "default:\n"
                 "      sudo apt install python3-gz-transport13 python3-gz-msgs10\n"
-                "      PYTHONPATH=/usr/lib/python3/dist-packages bash run.sh\n"
+                "  This feed appends that path itself, so the remaining cause "
+                "is that the\n  packages are not installed.\n"
                 "  The venv's python and the system python are both 3.12 on "
                 "Ubuntu 24.04, so\n  the ABI matches and the system path simply "
                 "works -- verified. Also note ROS 2's\n  vendored `gz` on PATH "
@@ -476,16 +487,24 @@ class GzFeed(Feed):
             return
 
     def read(self) -> tuple:
-        with self._lock:
-            latest, newest, n = self._latest, self._newest_sim_t, self._count
-            self._latest = None
-            last_rx = self._last_rx
-        if latest is None:
-            if time.monotonic() - last_rx > self._DEAD_AFTER_S:
+        # BLOCK for the next frame, exactly as UvcFeed does. Returning
+        # (None, None, {}) to mean "nothing new yet" is how a FINITE feed says
+        # end-of-file, and the data layer reads it that way: one read between
+        # renders and the run stops after a single published frame with a
+        # cheerful "end of feed". A camera is not finite. It either hands over
+        # a frame or it is broken, and _DEAD_AFTER_S decides which.
+        deadline = time.monotonic() + self._DEAD_AFTER_S
+        while True:
+            with self._lock:
+                latest, newest, n = self._latest, self._newest_sim_t, self._count
+                self._latest = None
+            if latest is not None:
+                break
+            if time.monotonic() > deadline:
                 raise FeedError("DLDE-03", f"no image on '{self.topic}' for "
                                            f"{self._DEAD_AFTER_S:g}s -- Gazebo stopped or "
                                            "the world was unloaded")
-            return None, None, {}
+            time.sleep(0.002)
         frame, sim_t, seq = latest
         age_ms = max(0.0, (newest - sim_t) * 1000.0)
         return frame, time.time(), {

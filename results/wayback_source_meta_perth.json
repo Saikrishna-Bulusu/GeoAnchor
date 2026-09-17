@@ -1,0 +1,35 @@
+{
+  "perth": {
+    "lat": -31.953,
+    "lon": 115.86,
+    "services_probed": 196,
+    "services_answering": 7,
+    "acquisitions": [
+      {
+        "service": "World_Imagery_Metadata_2014_r03",
+        "src_date": "20130105",
+        "src_res_m": 0.5,
+        "src_acc_m": 4.25,
+        "samp_res_m": 0.5,
+        "sensor": "WV02"
+      },
+      {
+        "service": "World_Imagery_Metadata_2017_r07",
+        "src_date": "20160206",
+        "src_res_m": 0.31,
+        "src_acc_m": 4.23,
+        "samp_res_m": 0.31,
+        "sensor": "WV03"
+      },
+      {
+        "service": "World_Imagery_Metadata_2017_r19",
+        "src_date": "20170109",
+        "src_res_m": 0.5,
+        "src_acc_m": 4.23,
+        "samp_res_m": 0.5,
+        "sensor": "WV02"
+      }
+    ],
+    "incomplete": true
+  }
+}

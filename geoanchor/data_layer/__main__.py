@@ -141,7 +141,7 @@ class DataLayer:
             # down would throw away frames at the sensor instead of at the
             # queue -- the opposite of what a conflating consumer wants. The
             # right answer there is to subsample on read, which is not written.
-            if fc.get("type", "file") in ("file", "env80"):
+            if fc.get("type", "file") in ("file", "env80", "gz"):
                 self.pacer = AdaptivePacer(
                     margin=float(fc.get("fps_margin", 1.15)),
                     bounds=tuple(fc.get("fps_bounds", [0.5, 10.0])))

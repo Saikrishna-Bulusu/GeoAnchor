@@ -91,8 +91,8 @@ class Config:
             problems.append("output_layer.fc.loop_mode must be 'off', 'open' or 'closed'")
 
         feed = self.get("data_layer.feed.type")
-        if feed not in ("file", "uvc", "rtsp", "env80"):
-            problems.append("data_layer.feed.type must be file, uvc, rtsp or env80")
+        if feed not in ("file", "uvc", "rtsp", "env80", "gz"):
+            problems.append("data_layer.feed.type must be file, uvc, rtsp, env80 or gz")
 
         lo = self.get("data_layer.envelope.agl_min_m", 50)
         hi = self.get("data_layer.envelope.agl_max_m", 100)

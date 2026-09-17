@@ -88,8 +88,69 @@ class MavlinkGps(GpsSource):
             raise GpsError("DLDE-04", f"cannot open MAVLink endpoint {endpoint}: {exc}") from exc
         self._link_down = False
         self.malformed = 0
+        self._last_beat = 0.0
+        self._last_request = 0.0
+
+    def _announce(self) -> None:
+        """Heartbeat at 1 Hz so the autopilot knows we are here.
+
+        A PIXHAWK OVER SERIAL STREAMS UNPROMPTED, which is why this was never
+        needed on the bench. A PX4 on UDP does not: it waits for a peer to
+        appear on the port before it sends anything, so a listener that only
+        listens receives nothing, for ever, with no error -- the symptom is
+        every frame logging "no altitude or no fx_px" and the matcher working
+        on an unrotated frame at a guessed scale. Announcing costs one datagram
+        a second and is what any GCS does."""
+        now = time.time()
+        if now - self._last_beat < 1.0:
+            return
+        self._last_beat = now
+        try:
+            from pymavlink import mavutil
+            self.conn.mav.heartbeat_send(
+                mavutil.mavlink.MAV_TYPE_ONBOARD_CONTROLLER,
+                mavutil.mavlink.MAV_AUTOPILOT_INVALID, 0, 0, 0)
+        except Exception:
+            # A link that cannot be written to is still worth reading from.
+            pass
+
+    def _request_streams(self) -> None:
+        """Ask for the two messages this layer actually needs.
+
+        DO NOT ASSUME THE AUTOPILOT VOLUNTEERS THEM. What an autopilot streams
+        unprompted depends on the link's configured mode and rate: PX4's
+        low-rate onboard instance sends little more than HEARTBEAT and
+        STATUSTEXT, and nothing guarantees GLOBAL_POSITION_INT or ATTITUDE on
+        any particular port. Without altitude the data layer cannot compute
+        GSD = altitude / fx_px and falls back to a fixed long edge; without
+        attitude the processing layer matches an unrotated frame, which
+        CLAUDE.md records as the difference between a working matcher and a
+        failing one.
+
+        Re-sent while nothing has arrived, because the request is a datagram
+        like any other and the first one can be sent before the autopilot has
+        registered this peer."""
+        now = time.time()
+        if now - self._last_request < 5.0:
+            return
+        self._last_request = now
+        try:
+            from pymavlink import mavutil
+            for msg_id, hz in ((mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT, 10.0),
+                               (mavutil.mavlink.MAVLINK_MSG_ID_ATTITUDE, 20.0),
+                               (mavutil.mavlink.MAVLINK_MSG_ID_GPS_RAW_INT, 5.0)):
+                self.conn.mav.command_long_send(
+                    self.conn.target_system or 1, self.conn.target_component or 1,
+                    mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL, 0,
+                    msg_id, 1e6 / hz, 0, 0, 0, 0, 0)
+        except Exception:
+            pass
 
     def poll(self, state: VehicleState) -> int:
+        self._announce()
+        # Stop asking once the data is flowing; resume if it stops.
+        if state.gps is None or state.gps_age() > 5.0 or state.att_age() > 5.0:
+            self._request_streams()
         self.malformed = 0
         n = 0
         while True:
@@ -144,6 +205,27 @@ class MavlinkGps(GpsSource):
                                       satellites=msg.satellites_visible, eph_m=eph,
                                       source="mavlink")
                 state.t_gps = now
+        elif t == "ALTITUDE":
+            # A SECOND SOURCE OF RELATIVE ALTITUDE, because the first is not
+            # guaranteed. PX4's onboard stream set carries GPS_RAW_INT,
+            # ODOMETRY, LOCAL_POSITION_NED and ATTITUDE but NOT
+            # GLOBAL_POSITION_INT, and SET_MESSAGE_INTERVAL does not conjure
+            # it. Reading altitude from only one message is therefore a silent
+            # dependency on the autopilot's stream configuration: with the
+            # wrong one, GSD = altitude / fx_px never runs and every frame is
+            # scaled to a fixed long edge instead.
+            state.rel_alt_m = float(msg.altitude_relative)
+            state.t_alt = now
+            if state.gps is not None:
+                state.gps.rel_alt_m = state.rel_alt_m
+        elif t == "LOCAL_POSITION_NED":
+            # Third fallback. NED, so down is positive and height is -z,
+            # relative to the EKF origin rather than to the terrain -- correct
+            # over the flat simulated ground, and an approximation anywhere the
+            # ground is not level with the launch point.
+            if state.t_alt == 0.0 or now - state.t_alt > 1.0:
+                state.rel_alt_m = -float(msg.z)
+                state.t_alt = now
         elif t == "ATTITUDE":
             state.roll_deg = math.degrees(msg.roll)
             state.pitch_deg = math.degrees(msg.pitch)

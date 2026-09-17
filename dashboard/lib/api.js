@@ -38,6 +38,25 @@ export async function postControl(layer, body) {
   return r.json();
 }
 
+/**
+ * Upload a reference map, the way an operator does on the ground before a
+ * flight. Multipart, not JSON: a GeoTIFF is tens of megabytes and base64 in a
+ * JSON body would inflate it by a third for no reason.
+ *
+ * The response carries the georeference the server read back, INCLUDING a
+ * `warning` when there is no projected CRS. That case matters more than it
+ * looks: a plain image with a .tif extension loads without error and then
+ * matches against nothing, which is a fault this project has already shipped
+ * once.
+ */
+export async function uploadMap(file) {
+  const form = new FormData();
+  form.append('file', file);
+  const r = await fetch(apiBase() + '/api/map', { method: 'POST', body: form });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
 /** lat/lon to a fraction of the map image, from the store's WGS84 bounds. */
 export function projectToPreview(bounds, lat, lon) {
   if (!bounds) return null;

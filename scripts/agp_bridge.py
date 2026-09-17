@@ -57,6 +57,20 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
+# THIS PROCESS NEEDS TWO PYTHON WORLDS AT ONCE, which nothing else here does.
+# rclpy and px4_msgs are ROS packages, built into a workspace and not
+# pip-installable, so this must run under ROS's interpreter. zmq and the
+# geoanchor package live in the repo venv. Neither environment has both.
+#
+# APPEND the venv, never prepend: putting it first shadows ROS's own
+# dependencies with the venv's copies and produces import failures far from
+# here. Appending means ROS wins every shared name and we pick up only what ROS
+# does not provide. Both interpreters are 3.12 on Ubuntu 24.04, so the ABI
+# matches -- check that before assuming this still holds on another release.
+for _sp in sorted(REPO.glob(".venv/lib/python3.*/site-packages")):
+    if str(_sp) not in sys.path:
+        sys.path.append(str(_sp))
+
 from geoanchor import config as cfgmod          # noqa: E402
 from geoanchor import contracts as K            # noqa: E402
 from geoanchor.bus import Subscriber            # noqa: E402

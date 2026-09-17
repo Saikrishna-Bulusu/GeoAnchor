@@ -1,0 +1,17 @@
+{
+  "run": "20260917T133640Z_sydney_replay",
+  "frames": 1766,
+  "accepted": 481,
+  "median_m": 6.6,
+  "p90_m": 7.86,
+  "p99_m": 11.97,
+  "max_m": 14.82,
+  "within_5": 16,
+  "within_10": 98,
+  "within_20": 100,
+  "inliers_median": 75,
+  "inliers_min": 13,
+  "inliers_max": 190,
+  "latency_median_ms": 63.2,
+  "latency_p95_ms": 97.6
+}
