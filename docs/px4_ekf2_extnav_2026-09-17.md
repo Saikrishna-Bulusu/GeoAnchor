@@ -123,6 +123,96 @@ ExternalNav publish rate to be separated first, which they currently are not.
 
 ---
 
+## There is a second PX4 path with no rate floor at all: Aux Global Position
+
+The 5 Hz floor is a property of the **external vision** aid source, not of PX4.
+EKF2 has a separate aid source, **Aux Global Position** (AGP), whose starting
+condition is the whole of this:
+
+```c
+// EKF/aid_sources/aux_global_position/aux_global_position.cpp:93
+const bool starting_conditions = PX4_ISFINITE(sample.latitude)
+                                 && PX4_ISFINITE(sample.longitude)
+                                 && ekf.control_status_flags().yaw_align;
+```
+
+**No interval check.** The only timing rule on the path is a **5-second**
+timeout (`:174`), against the EV path's 200 ms start gate and 400 ms stop.
+PX4's own AGP simulator publishes at `ScheduleOnInterval(500_ms)` — **2 Hz**,
+below the EV floor — which is the clearest possible statement of intent.
+
+### Measured, not just read
+
+`SENS_EN_AGPSIM 1`, `EKF2_AGP_CTRL 1`, then GNSS denied at runtime. AGP at 2 Hz
+was the only global source left:
+
+```
+    t   lat drift m
+  0.0          0.00
+ 10.1          0.00
+ 20.1         -0.01
+ 35.1          0.00
+
+estimator_aid_src_aux_global_position
+    time_last_fuse: 53072000
+    innovation_rejected: False
+    fused: True            <- against the EV path's `false` at 4 Hz
+cs_aux_gpos: True
+```
+
+**It fuses at 2 Hz and holds the estimate.** That is the rate the Xavier replay
+actually runs at.
+
+### It also fits this pipeline far better than ODOMETRY does
+
+`aux_global_position` is a `VehicleGlobalPosition`:
+
+| field | what this project produces |
+|---|---|
+| `lat`, `lon` (float64, degrees) | **exactly** what the geodetic stage outputs |
+| `eph` (float32, metres) | "standard deviation of horizontal position error" — **exactly** what the covariance estimator outputs, as one scalar |
+| `timestamp_sample` | capture time, for `EKF2_AGP_DELAY` |
+| `lat_lon_reset_counter` | the reset counter already tracked |
+
+Every trap in the section below disappears. There is no 21-float covariance to
+pack, so no per-axis-versus-summed ambiguity and no σ²/2 question. There is no
+local frame, so no `LOCAL_FRD`/`LOCAL_NED` rotation and no origin to keep in
+step. `pos_noise = max(eph, EKF2_AGP_NOISE, 0.01)` — our sigma goes in
+directly, floored at 0.9 m by default.
+
+### The catch: it is uXRCE-DDS only
+
+`/fmu/in/aux_global_position` is in `dds_topics.yaml:163` and there is **no
+MAVLink message that reaches it** — `grep -rn aux_global_position
+src/modules/mavlink/` returns nothing. Publishing to it means a DDS participant
+on the companion computer, which in practice means ROS 2 with `px4_msgs`, or
+Fast DDS against the PX4 IDL without ROS.
+
+That is the stack this runtime deliberately does not have (`CLAUDE.md`: "one
+fewer stack on the board and one fewer thing to install on JetPack 5"), and it
+is the same stack NGPS uses. So the MAVLink-versus-DDS decision is no longer a
+style question — **DDS is the only route to the PX4 aid source whose rate
+requirements this pipeline can actually meet.**
+
+`Micro-XRCE-DDS-Agent` is already built at the parent repo root.
+
+### The options, with what is known about each
+
+| route | rate floor | new stack on the board | covariance path |
+|---|---|---|---|
+| **ArduPilot ExternalNav (MAVLink)** | **none** | none | 21 floats, summed, clamped [0.01, 100] m |
+| PX4 AGP (uXRCE-DDS) | **none** (5 s timeout) | DDS / ROS 2 | `eph`, one scalar, floored only |
+| PX4 EV, pad the stream to ≥6 Hz | works around it | none | 21 floats, per-axis, floored only |
+| PX4 EV, raise the pipeline above 5 Hz | meets it honestly | none | as above |
+| PX4 EV, patch `EV_MAX_INTERVAL` | removed | forked firmware | as above |
+
+Patching the constant is a `constexpr` in a header, so it is a firmware fork —
+which forfeits the reason to use stock PX4 at all, and means every board must
+fly a custom build. Not recommended, and listed only so it is on the record as
+considered.
+
+---
+
 ## Three encoding differences, all silent in both directions
 
 Every one was verified against PX4 source and then against a live EKF2.

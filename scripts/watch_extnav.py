@@ -92,6 +92,17 @@ def main() -> int:
     ap.add_argument("--seconds", type=float, default=30.0)
     ap.add_argument("--rate", type=float, default=4.0)
     ap.add_argument("--sigma", type=float, default=2.0)
+    ap.add_argument("--fix-rate", type=float, default=None,
+                    help="how often a NEW fix is computed, when that is slower "
+                         "than --rate. The most recent fix is then RE-SENT to "
+                         "pad the stream up to --rate. This models the only "
+                         "route around PX4's 5 Hz floor that does not fork the "
+                         "firmware; see docs/px4_ekf2_extnav_2026-09-17.md.")
+    ap.add_argument("--repeat-stamp", choices=["capture", "now"], default="capture",
+                    help="timestamp on a RE-SENT fix. 'capture' keeps the "
+                         "original, which is honest and is what delay "
+                         "compensation needs; 'now' restamps it, which is what "
+                         "a naive pad would do.")
     a = ap.parse_args()
 
     # The firmware has to be known BEFORE the link is built, because it picks
@@ -194,7 +205,9 @@ def main() -> int:
     print(f"{denial.decode()} set to 0 -- vehicle is now GNSS-denied")
 
     print(f"injecting a position {a.offset_m:.0f} m north, sigma {a.sigma} m, "
-          f"{a.rate} Hz for {a.seconds:.0f}s\n")
+          f"{a.rate} Hz"
+          + (f" (new fix at {a.fix_rate} Hz, padded)" if a.fix_rate else "")
+          + f" for {a.seconds:.0f}s\n")
     # EKF_STATUS_REPORT is an ArduPilot message. PX4 does not send it, so on
     # PX4 the column is omitted rather than printed as a permanent zero -- a
     # zero here already read as evidence once when it was only an absent stream.
@@ -228,10 +241,21 @@ def _inject(a, link, obs, lat0, lon0, firmware, show_flags) -> int:
     link.ensure_origin(lat0, lon0)
     period, t0, nxt, last = 1.0 / a.rate, time.time(), 0.0, None
     flags, nxt_row = 0, 0.0
+    # Padding: a NEW fix appears every fix_period, and every send in between
+    # re-sends the most recent one. fix_period == period means no padding,
+    # which is the original behaviour.
+    fix_period = 1.0 / a.fix_rate if a.fix_rate else period
+    nxt_fix, cur_stamp, n_new, n_repeat = 0.0, None, 0, 0
     while time.time() - t0 < a.seconds:
         now = time.time()
         if now >= nxt:
-            link.send(tgt_lat, lon0, a.sigma, t_capture_unix=now)
+            if now >= nxt_fix or cur_stamp is None:
+                cur_stamp, nxt_fix = now, now + fix_period
+                n_new += 1
+            else:
+                n_repeat += 1
+            stamp = cur_stamp if a.repeat_stamp == "capture" else now
+            link.send(tgt_lat, lon0, a.sigma, t_capture_unix=stamp)
             nxt = now + period
         g = obs.recv_match(type="GLOBAL_POSITION_INT", blocking=False)
         if g and abs(g.lat) > 1e-7:
@@ -245,7 +269,11 @@ def _inject(a, link, obs, lat0, lon0, firmware, show_flags) -> int:
             nxt_row += 5.0
         time.sleep(0.02)
 
-    print(f"\nsent {link.sent} messages, final drift {last:.2f} m of {a.offset_m:.0f} m injected")
+    print(f"\nsent {link.sent} messages"
+          + (f" ({n_new} new fixes, {n_repeat} re-sends, stamp={a.repeat_stamp})"
+             if a.fix_rate else "")
+          + f", final drift {last if last is not None else float('nan'):.2f} m "
+            f"of {a.offset_m:.0f} m injected")
     print("walked toward the injection = fused.  held at 0 = ignored.")
     return 0
 
