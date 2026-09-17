@@ -1,0 +1,340 @@
+{
+  "args": {
+    "config": "configs/env80.yaml",
+    "data_root": "data/AnyVisLoc",
+    "frames_root": "data/AnyVisLoc_env80",
+    "scenes": "Scene_09",
+    "modes": "satellite",
+    "methods": "xfeat_mnn,xfeat_lg",
+    "out": "results/refkp/s09_228",
+    "prior": "none",
+    "prior_radius": 120.0,
+    "frame_keypoints": 4096,
+    "ref_keypoints": 228,
+    "frame_px": 512,
+    "score": null,
+    "tile_px": 1024,
+    "overlap_px": 128,
+    "min_matches": 12,
+    "ransac_px": 3.0,
+    "agl_min": 50.0,
+    "agl_max": 100.0,
+    "view_angle_min": 80.0,
+    "anchor": null,
+    "limit": 0,
+    "no_rectify": false,
+    "no_tile_ransac": false,
+    "rebuild": false
+  },
+  "generated": 1789645074.763289,
+  "summaries": {
+    "Scene_09__satellite__xfeat_mnn": {
+      "n_frames": 134,
+      "n_plausible": 25,
+      "plausible_rate": 0.1866,
+      "median_latency_ms": 89.35,
+      "p95_latency_ms": 127.35999999999999,
+      "median_inliers": 8,
+      "p10_inliers": 5.0,
+      "gates": {
+        "0": {
+          "accepted": 25,
+          "accept_rate": 0.1866,
+          "median_m": 2.785,
+          "p90_m": 6.487,
+          "p99_m": 141.077,
+          "max_m": 169.756,
+          "within_5m": 0.84,
+          "within_10m": 0.92,
+          "within_20m": 0.92
+        },
+        "5": {
+          "accepted": 24,
+          "accept_rate": 0.1791,
+          "median_m": 2.784,
+          "p90_m": 5.387,
+          "p99_m": 132.328,
+          "max_m": 169.756,
+          "within_5m": 0.875,
+          "within_10m": 0.9583,
+          "within_20m": 0.9583
+        },
+        "6": {
+          "accepted": 21,
+          "accept_rate": 0.1567,
+          "median_m": 2.783,
+          "p90_m": 4.705,
+          "p99_m": 6.757,
+          "max_m": 7.026,
+          "within_5m": 0.9048,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "8": {
+          "accepted": 15,
+          "accept_rate": 0.1119,
+          "median_m": 2.613,
+          "p90_m": 3.714,
+          "p99_m": 4.598,
+          "max_m": 4.705,
+          "within_5m": 1.0,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "10": {
+          "accepted": 11,
+          "accept_rate": 0.0821,
+          "median_m": 2.613,
+          "p90_m": 3.377,
+          "p99_m": 4.573,
+          "max_m": 4.705,
+          "within_5m": 1.0,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "12": {
+          "accepted": 3,
+          "accept_rate": 0.0224,
+          "median_m": 2.783,
+          "p90_m": 3.233,
+          "p99_m": 3.335,
+          "max_m": 3.346,
+          "within_5m": 1.0,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "14": {
+          "accepted": 2,
+          "accept_rate": 0.0149,
+          "median_m": 2.698,
+          "p90_m": 2.766,
+          "p99_m": 2.781,
+          "max_m": 2.783,
+          "within_5m": 1.0,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "15": {
+          "accepted": 1,
+          "accept_rate": 0.0075,
+          "median_m": 2.783,
+          "p90_m": 2.783,
+          "p99_m": 2.783,
+          "max_m": 2.783,
+          "within_5m": 1.0,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "20": {
+          "accepted": 0,
+          "accept_rate": 0.0,
+          "median_m": null,
+          "p90_m": null,
+          "p99_m": null,
+          "max_m": null,
+          "within_5m": null,
+          "within_10m": null,
+          "within_20m": null
+        },
+        "25": {
+          "accepted": 0,
+          "accept_rate": 0.0,
+          "median_m": null,
+          "p90_m": null,
+          "p99_m": null,
+          "max_m": null,
+          "within_5m": null,
+          "within_10m": null,
+          "within_20m": null
+        },
+        "30": {
+          "accepted": 0,
+          "accept_rate": 0.0,
+          "median_m": null,
+          "p90_m": null,
+          "p99_m": null,
+          "max_m": null,
+          "within_5m": null,
+          "within_10m": null,
+          "within_20m": null
+        },
+        "40": {
+          "accepted": 0,
+          "accept_rate": 0.0,
+          "median_m": null,
+          "p90_m": null,
+          "p99_m": null,
+          "max_m": null,
+          "within_5m": null,
+          "within_10m": null,
+          "within_20m": null
+        },
+        "60": {
+          "accepted": 0,
+          "accept_rate": 0.0,
+          "median_m": null,
+          "p90_m": null,
+          "p99_m": null,
+          "max_m": null,
+          "within_5m": null,
+          "within_10m": null,
+          "within_20m": null
+        }
+      }
+    },
+    "Scene_09__satellite__xfeat_lg": {
+      "n_frames": 134,
+      "n_plausible": 19,
+      "plausible_rate": 0.1418,
+      "median_latency_ms": 815.9000000000001,
+      "p95_latency_ms": 993.18,
+      "median_inliers": 14,
+      "p10_inliers": 7.0,
+      "gates": {
+        "0": {
+          "accepted": 19,
+          "accept_rate": 0.1418,
+          "median_m": 2.944,
+          "p90_m": 5.314,
+          "p99_m": 11.0,
+          "max_m": 11.314,
+          "within_5m": 0.8947,
+          "within_10m": 0.9474,
+          "within_20m": 1.0
+        },
+        "5": {
+          "accepted": 19,
+          "accept_rate": 0.1418,
+          "median_m": 2.944,
+          "p90_m": 5.314,
+          "p99_m": 11.0,
+          "max_m": 11.314,
+          "within_5m": 0.8947,
+          "within_10m": 0.9474,
+          "within_20m": 1.0
+        },
+        "6": {
+          "accepted": 19,
+          "accept_rate": 0.1418,
+          "median_m": 2.944,
+          "p90_m": 5.314,
+          "p99_m": 11.0,
+          "max_m": 11.314,
+          "within_5m": 0.8947,
+          "within_10m": 0.9474,
+          "within_20m": 1.0
+        },
+        "8": {
+          "accepted": 16,
+          "accept_rate": 0.1194,
+          "median_m": 3.041,
+          "p90_m": 6.86,
+          "p99_m": 11.052,
+          "max_m": 11.314,
+          "within_5m": 0.875,
+          "within_10m": 0.9375,
+          "within_20m": 1.0
+        },
+        "10": {
+          "accepted": 15,
+          "accept_rate": 0.1119,
+          "median_m": 3.139,
+          "p90_m": 7.401,
+          "p99_m": 11.07,
+          "max_m": 11.314,
+          "within_5m": 0.8667,
+          "within_10m": 0.9333,
+          "within_20m": 1.0
+        },
+        "12": {
+          "accepted": 13,
+          "accept_rate": 0.097,
+          "median_m": 2.944,
+          "p90_m": 3.96,
+          "p99_m": 4.129,
+          "max_m": 4.152,
+          "within_5m": 1.0,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "14": {
+          "accepted": 11,
+          "accept_rate": 0.0821,
+          "median_m": 2.624,
+          "p90_m": 3.964,
+          "p99_m": 4.133,
+          "max_m": 4.152,
+          "within_5m": 1.0,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "15": {
+          "accepted": 9,
+          "accept_rate": 0.0672,
+          "median_m": 2.624,
+          "p90_m": 3.985,
+          "p99_m": 4.135,
+          "max_m": 4.152,
+          "within_5m": 1.0,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "20": {
+          "accepted": 1,
+          "accept_rate": 0.0075,
+          "median_m": 4.152,
+          "p90_m": 4.152,
+          "p99_m": 4.152,
+          "max_m": 4.152,
+          "within_5m": 1.0,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "25": {
+          "accepted": 1,
+          "accept_rate": 0.0075,
+          "median_m": 4.152,
+          "p90_m": 4.152,
+          "p99_m": 4.152,
+          "max_m": 4.152,
+          "within_5m": 1.0,
+          "within_10m": 1.0,
+          "within_20m": 1.0
+        },
+        "30": {
+          "accepted": 0,
+          "accept_rate": 0.0,
+          "median_m": null,
+          "p90_m": null,
+          "p99_m": null,
+          "max_m": null,
+          "within_5m": null,
+          "within_10m": null,
+          "within_20m": null
+        },
+        "40": {
+          "accepted": 0,
+          "accept_rate": 0.0,
+          "median_m": null,
+          "p90_m": null,
+          "p99_m": null,
+          "max_m": null,
+          "within_5m": null,
+          "within_10m": null,
+          "within_20m": null
+        },
+        "60": {
+          "accepted": 0,
+          "accept_rate": 0.0,
+          "median_m": null,
+          "p90_m": null,
+          "p99_m": null,
+          "max_m": null,
+          "within_5m": null,
+          "within_10m": null,
+          "within_20m": null
+        }
+      }
+    }
+  }
+}
