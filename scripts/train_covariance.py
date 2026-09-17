@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Train the covariance estimator and export it for the runtime's `learned` backend.
 
+    python scripts/train_covariance.py --sweep results/train_sweep --method edgepoint2_s64
     python scripts/train_covariance.py --root ~/GeoAnchor/results/s8_train
-    python scripts/train_covariance.py --out models/covariance_xfeat.pkl
 
 THE GAP THIS FILLS. `processing_layer/covariance.py` has shipped a working
 `Learned` backend and no model, so every flight has run on `gate_only` -- a
@@ -30,7 +30,24 @@ of which have already produced a wrong answer once when broken:
     catastrophes -- not a localisation result, and training on it fits the
     estimator to a broken matcher.
 
-FEATURES ARE THE INTERSECTION, DELIBERATELY. The harness records more than the
+TWO SOURCES, AND --sweep IS THE BETTER ONE.
+
+  --sweep   this runtime's own env80_sweep.py output. Its CSV carries ALL
+            EIGHT of covariance.FEATURES under the definitions the flying code
+            uses, because the same `solve()` produced them. A model trained
+            here cannot suffer a train/inference mismatch, and it works for any
+            method the runtime has -- including EdgePoint2, which the parent
+            harness does not implement.
+
+  --root    the parent repo's harness output (results/s8_train). More scenes,
+            but its fix_quality features share NAMES with the runtime's while
+            meaning different things, so only five survive the intersection
+            below.
+
+Prefer --sweep. --root is kept because it is the only source with XFeat
+harness runs already on disk.
+
+FEATURES ARE THE INTERSECTION, DELIBERATELY (--root only). The harness records more than the
 runtime can compute in flight, and three of the runtime's own `FEATURES`
 (`keypoints`, `scale`, `tiles_searched`) have a DIFFERENT MEANING in the
 harness -- its `n_pnp_input` is not the runtime's keypoint count and its
@@ -121,6 +138,41 @@ def load(root: str, reference: str = "satellite", exclude=("Scene_21",)):
     return rows
 
 
+# The runtime's own feature list, in covariance.FEATURES order. Available in
+# full ONLY from --sweep, where the same solve() that flies produced them.
+_SWEEP_FEATURES = ["inliers", "inlier_ratio", "matches", "keypoints",
+                   "reproj_err_px", "altitude_m", "scale", "tiles_searched"]
+
+
+def load_sweep(root: str, method: str = None, exclude=("Scene_21",)):
+    """Rows from env80_sweep.py CSVs. Same shape load() returns."""
+    import csv as _csv
+    rows = []
+    for f in sorted(glob.glob(os.path.join(root, "*.csv"))):
+        for r in _csv.DictReader(open(f)):
+            if r.get("scene") in exclude:
+                continue
+            if method and r.get("method") != method:
+                continue
+            # Only SOLVED frames carry an error to regress against. A frame the
+            # solver rejected has no position and therefore no error; those
+            # belong to the rejection problem, which the inlier gate wins.
+            if str(r.get("plausible")).lower() not in ("true", "1"):
+                continue
+            try:
+                err = float(r["error_m"])
+            except (TypeError, ValueError, KeyError):
+                continue
+            if not (0 < err <= 1e4):
+                continue
+            try:
+                feats = {k: float(r[k]) for k in _SWEEP_FEATURES}
+            except (TypeError, ValueError, KeyError):
+                continue
+            rows.append((r["scene"], r["method"], feats, err))
+    return rows
+
+
 def fit(X, y):
     from sklearn.ensemble import GradientBoostingRegressor
     m = GradientBoostingRegressor(n_estimators=200, max_depth=3, learning_rate=0.05,
@@ -131,9 +183,15 @@ def fit(X, y):
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--root", default=str(Path.home() / "GeoAnchor/results/s8_train"))
+    ap.add_argument("--root", default=str(Path.home() / "GeoAnchor/results/s8_train"),
+                    help="parent-repo harness output (5 features after the "
+                         "intersection)")
+    ap.add_argument("--sweep", default=None,
+                    help="this runtime's env80_sweep.py output directory. "
+                         "PREFERRED: all 8 runtime features, same definitions "
+                         "as the flying code, works for any method.")
     ap.add_argument("--reference", default="satellite")
-    ap.add_argument("--matcher", default=None,
+    ap.add_argument("--matcher", "--method", dest="matcher", default=None,
                     help="train on one matcher only. The finding is that Eq. 7 is "
                          "DESCRIPTOR-SPECIFIC, so a per-matcher model is the "
                          "honest default; pooling is the thing to justify.")
@@ -142,12 +200,20 @@ def main() -> int:
     a = ap.parse_args()
 
     excl = tuple(s for s in a.exclude_scene.split(",") if s)
-    rows = load(a.root, a.reference, exclude=excl)
-    if a.matcher:
-        rows = [r for r in rows if r[1] == a.matcher]
+    if a.sweep:
+        feature_names = _SWEEP_FEATURES
+        rows = load_sweep(a.sweep, a.matcher, exclude=excl)
+        source = f"sweep:{a.sweep}"
+    else:
+        feature_names = _FEATURES
+        rows = load(a.root, a.reference, exclude=excl)
+        if a.matcher:
+            rows = [r for r in rows if r[1] == a.matcher]
+        source = f"harness:{a.root}"
     if not rows:
         print(f"no usable rows under {a.root}")
         print("  Needs fix_quality, which only runs made after the step9 patch carry.")
+        print("  Or use --sweep <env80_sweep output dir>, which needs none of it.")
         return 1
 
     scenes = sorted({r[0] for r in rows})
@@ -159,13 +225,14 @@ def main() -> int:
               "\n  a 50/50 split and the group-identity guard in CLAUDE.md applies: "
               "\n  altitude separates two scenes perfectly and the model splits on it.")
 
-    X = np.array([[r[2][k] for k in _FEATURES] for r in rows], float)
+    X = np.array([[r[2][k] for k in feature_names] for r in rows], float)
     y_m = np.array([r[3] for r in rows], float)
     y = np.log(y_m)
     groups = np.array([r[0] for r in rows])
 
     # ---- leave one SCENE out -------------------------------------------
-    print(f"\n\033[1mLeave-one-scene-out\033[0m  (n={len(rows)}, {len(_FEATURES)} features)")
+    print(f"\n\033[1mLeave-one-scene-out\033[0m  (n={len(rows)}, "
+          f"{len(feature_names)} features from {source})")
     print(f"  {'held out':12} {'n':>5} {'med pred':>9} {'med actual':>11} {'ratio':>7}")
     preds = np.zeros(len(rows))
     for s in scenes:
@@ -207,7 +274,7 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     blob = {
         "model": model,
-        "features": _FEATURES,
+        "features": feature_names,
         "meta": {
             "target": "log_sigma",
             "calibrated": True,
@@ -220,7 +287,7 @@ def main() -> int:
             "reference": a.reference,
             "excluded_scenes": list(excl),
             "banned_as_predictors": sorted(_BANNED),
-            "source_root": a.root,
+            "source": source,
             "note": "sigma in METRES. Trained on log(error); Learned.sigma_m "
                     "exponentiates because meta.target == 'log_sigma'.",
         },
