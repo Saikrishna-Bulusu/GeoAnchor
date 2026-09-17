@@ -259,7 +259,23 @@ def main():
         west, south, east, north = (float(v) for v in a.bbox.split(","))
     else:
         raise SystemExit("give --match <tif> or --bbox w,s,e,n")
-    dst_crs = dst_crs or "EPSG:32756"
+    # DERIVE THE UTM ZONE. This used to fall back to a hardcoded EPSG:32756,
+    # which is zone 56S -- Sydney's. Every --bbox fetch anywhere else in the
+    # country therefore landed in Sydney's projection: Melbourne 8 degrees
+    # outside it, PERTH 37 DEGREES OUTSIDE IT. A tile and its own historical
+    # captures all get the same warp, so matching between them is unaffected
+    # and inlier counts are still comparable -- but distances in metres are
+    # scaled by the UTM scale-factor error, which grows with the square of the
+    # distance from the central meridian and is nonsense that far out.
+    #
+    # ap_vo2 and geoanchor both require a UTM tile and fail silently on a
+    # wrong one, so this is not only a measurement issue.
+    if not dst_crs:
+        clon_, clat_ = (west + east) / 2, (south + north) / 2
+        zone = int((clon_ + 180) / 6) + 1
+        dst_crs = f"EPSG:{32700 + zone if clat_ < 0 else 32600 + zone}"
+        print(f"CRS {dst_crs} (UTM zone {zone}{'S' if clat_ < 0 else 'N'}), "
+              f"derived from the bbox centre")
 
     if a.list:
         list_distinct((south + north) / 2, (west + east) / 2, min(a.zoom, 18))
