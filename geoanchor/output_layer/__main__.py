@@ -376,7 +376,21 @@ class OutputLayer:
             config={
                 "loop_mode": self.loop_mode, "loss": self.loss_kind,
                 "pair_window_s": self.pair_window, "alarm_error_m": self.alarm_m,
-                "fc": self.fc.describe() if self.fc else {"enabled": False, "error": self.fc_error},
+                # REPORT THE CONFIGURED IDENTITY EVEN WHEN THE WRITER IS OFF.
+                # `describe()` only exists on a live writer, so with
+                # `fc.enabled: false` -- which every rig here starts with,
+                # "open loop before closed, always" -- this used to be just
+                # {enabled, error}. The dashboard read firmware from it, found
+                # nothing, and fell back to a hardcoded 'ardupilot' through an
+                # entire PX4 flight. `controller` was never in describe() at
+                # all, so it showed its default unconditionally.
+                #
+                # Configured values first, live ones layered on top: what the
+                # writer reports about itself wins where it has an opinion.
+                "fc": {**{k: v for k, v in (self.cfg.section("output_layer").get("fc") or {}).items()
+                          if k in ("enabled", "firmware", "controller", "endpoint", "message")},
+                       **(self.fc.describe() if self.fc
+                          else {"enabled": False, "error": self.fc_error})},
                 "qgc": self.qgc.describe() if self.qgc else {"enabled": False, "error": self.qgc_error},
                 "summary": self.stats.summary(),
                 "records": self.time_step,

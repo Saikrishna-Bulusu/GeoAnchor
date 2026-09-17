@@ -209,8 +209,14 @@ class DataLayer:
             config={
                 "feed": self._feed_desc(),
                 "gps": self.gps.describe() if self.gps else None,
+                # `source` belongs here: WHICH MAP is the first thing an
+                # operator asks, and the dashboard was showing "--" for it
+                # because the store id, tile count, GSD and method were all
+                # reported and the filename was not. A store hash does not tell
+                # anyone whether the right ground is loaded.
                 "map": {"store_id": self.manifest["store_id"], "tiles": self.manifest["n_tiles"],
-                        "gsd_m_px": self.manifest["gsd_m_px"], "method": self.manifest["method"]}
+                        "gsd_m_px": self.manifest["gsd_m_px"], "method": self.manifest["method"],
+                        "source": str(self.cfg.get("data_layer.map.source", "") or "")}
                 if self.manifest else None,
                 "paused": self.paused, "note": note, "dropped_frames": self._dropped,
                 "device_errors": self.log.device_errors,

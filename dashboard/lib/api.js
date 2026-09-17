@@ -57,6 +57,13 @@ export async function uploadMap(file) {
   return r.json();
 }
 
+/** A PNG of a map file on the server, so an upload can be looked at.
+ *  /api/map.png is the store the pipeline is MATCHING against; this is any
+ *  file under data/, which is what you need before deciding to apply one. */
+export function mapPreviewUrl(path, px = 900) {
+  return `${apiBase()}/api/map/preview?path=${encodeURIComponent(path)}&px=${px}`;
+}
+
 /** lat/lon to a fraction of the map image, from the store's WGS84 bounds. */
 export function projectToPreview(bounds, lat, lon) {
   if (!bounds) return null;

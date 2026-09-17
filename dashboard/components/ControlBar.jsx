@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { getJSON, postControl, uploadMap } from '@/lib/api';
+import { getJSON, mapPreviewUrl, postControl, uploadMap } from '@/lib/api';
 
 const FIRMWARES = [
   { id: 'ardupilot', label: 'ArduPilot (EKF3)' },
@@ -20,7 +20,7 @@ const LOOPS = [
   { id: 'closed', label: 'Closed — send predicted GPS' },
 ];
 
-export default function ControlBar({ layers, methods, disabled, loopMode, Panel }) {
+export default function ControlBar({ layers, methods, disabled, loopMode, config, mapPacket, Panel }) {
   const [busy, setBusy] = useState(null);
   const [err, setErr] = useState(null);
   const [cov, setCov] = useState(null);       // /api/covariance
@@ -38,6 +38,24 @@ export default function ControlBar({ layers, methods, disabled, loopMode, Panel 
   const dl = layers?.data?.status?.config || {};
   const pl = layers?.processing?.status?.config || {};
   const ol = layers?.output?.status?.config || {};
+
+  // WHAT THE RUN IS ACTUALLY CONFIGURED WITH, which is not always what the
+  // output layer reports. `ol.fc` is `fc.describe()` -- and that object only
+  // exists when the FC WRITER IS ENABLED. Every rig here starts with
+  // `output_layer.fc.enabled=false` ("open loop before closed, always"), so
+  // `ol.fc` is `{enabled: false}`, `ol.fc.firmware` is undefined, and a
+  // `|| 'ardupilot'` fallback then displayed ArduPilot through an entire PX4
+  // flight. `describe()` does not carry `controller` at all, so that field
+  // showed its default unconditionally.
+  //
+  // So: live value first where one genuinely exists, then the running config
+  // snapshot, and only then a literal. A control that falls back to a
+  // hardcoded default is asserting a fact it does not have.
+  const oc = config?.output_layer?.fc || {};
+  // The map packet names the source too, and it survives a data layer that has
+  // restarted since its last heartbeat.
+  const mapPacketSource = mapPacket?.source_path || '';
+  const pick = (live, cfgv, dflt) => (live ?? cfgv ?? dflt);
 
   const send = async (layer, body) => {
     setBusy(layer); setErr(null);
@@ -63,7 +81,13 @@ export default function ControlBar({ layers, methods, disabled, loopMode, Panel 
     : ['orb', 'sift', 'akaze', 'xfeat_mnn', 'xfeat_lg',
        'edgepoint2_t32', 'edgepoint2_s32', 'edgepoint2_s64'];
 
-  const loop = loopMode || ol.loop_mode || 'off';
+  // LIVE FIRST. `loopMode` is read from the config SNAPSHOT, which is the
+  // boot-time YAML and never changes; `ol.loop_mode` is the value the output
+  // layer is actually running and updates on `set_loop_mode`. Preferring the
+  // snapshot meant switching to closed loop moved the layer and left the
+  // dashboard reading "open" -- the one disagreement that matters, because it
+  // is the control that decides what reaches the vehicle.
+  const loop = ol.loop_mode ?? loopMode ?? 'off';
   const Wrap = Panel || (({ title, right, children }) => (
     <div className="panel"><header><h2>{title}</h2><span className="spacer" />{right}</header>{children}</div>
   ));
@@ -134,7 +158,7 @@ export default function ControlBar({ layers, methods, disabled, loopMode, Panel 
 
           <div className="field">
             <label className="label" htmlFor="fw">Flight firmware</label>
-            <select id="fw" disabled={disabled} value={ol.fc?.firmware || 'ardupilot'}
+            <select id="fw" disabled={disabled} value={pick(ol.fc?.firmware, oc.firmware, 'ardupilot')}
                     onChange={(e) => send('output', { cmd: 'set', path: 'output_layer.fc.firmware', value: e.target.value })}>
               {FIRMWARES.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
             </select>
@@ -142,7 +166,7 @@ export default function ControlBar({ layers, methods, disabled, loopMode, Panel 
 
           <div className="field">
             <label className="label" htmlFor="fcu">Flight computer</label>
-            <select id="fcu" disabled={disabled} value={ol.fc?.controller || 'pixhawk6c'}
+            <select id="fcu" disabled={disabled} value={pick(ol.fc?.controller, oc.controller, 'pixhawk6c')}
                     onChange={(e) => send('output', { cmd: 'set', path: 'output_layer.fc.controller', value: e.target.value })}>
               {CONTROLLERS.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
@@ -287,19 +311,36 @@ export default function ControlBar({ layers, methods, disabled, loopMode, Panel 
                     })}>
               Use this map
             </button>
-            <span className="meta">current: <code>{dl.map?.source || '--'}</code></span>
+            <span className="meta">current: <code>{dl.map?.source || mapPacketSource || '--'}</code></span>
           </div>
 
           {mapInfo && (
-            <p className="note" style={{ marginTop: 9, color: mapInfo.projected ? undefined : 'var(--bad)' }}>
-              {mapInfo.projected ? (
-                <>Uploaded <code>{mapInfo.path}</code> &mdash; {mapInfo.width}&times;{mapInfo.height} px,
-                  {' '}{mapInfo.crs}, {Number(mapInfo.gsd_m_px).toFixed(4)} m/px. Ready to use.</>
-              ) : (
-                <>{mapInfo.warning || 'This file carries no projected CRS.'} The pipeline needs a
-                  UTM GeoTIFF; it will not be accepted.</>
-              )}
-            </p>
+            <>
+              <p className="note" style={{ marginTop: 9, color: mapInfo.projected ? undefined : 'var(--bad)' }}>
+                {mapInfo.projected ? (
+                  <>Uploaded <code>{mapInfo.path}</code> &mdash; {mapInfo.width}&times;{mapInfo.height} px,
+                    {' '}{mapInfo.crs}, {Number(mapInfo.gsd_m_px).toFixed(4)} m/px. Ready to use.</>
+                ) : (
+                  <>{mapInfo.warning || 'This file carries no projected CRS.'} The pipeline needs a
+                    UTM GeoTIFF; it will not be accepted.</>
+                )}
+              </p>
+              {/* LOOK AT IT BEFORE APPLYING IT. A CRS and a pixel count do not
+                  tell an operator whether the tile covers the ground they mean
+                  to fly over, and applying the wrong map costs a full pass of
+                  the detector over the whole thing before anything goes wrong
+                  visibly. */}
+              <div style={{ marginTop: 9 }}>
+                <img src={mapPreviewUrl(mapInfo.path)} alt={`preview of ${mapInfo.path}`}
+                     style={{ maxWidth: '100%', maxHeight: 260, borderRadius: 6,
+                              border: '1px solid var(--line)', display: 'block' }}
+                     onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                <span className="meta">
+                  the file as uploaded &mdash; not yet the reference
+                  {mapInfo.applied ? ' (applied)' : ''}
+                </span>
+              </div>
+            </>
           )}
         </div>
 

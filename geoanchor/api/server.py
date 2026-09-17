@@ -36,7 +36,7 @@ from ..bus import CommandClient, Subscriber
 # for that closes the socket instead of raising, so the browser sees a bare
 # HTTP 403 on the upgrade with no traceback anywhere. Cost an hour once.
 try:
-    from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+    from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse, JSONResponse, Response
     from fastapi.staticfiles import StaticFiles
@@ -151,6 +151,17 @@ class Hub:
         if layer not in self._ctl:
             self._ctl[layer] = CommandClient(self.cfg.get(key))
         return self._ctl[layer].send(msg)
+
+    def live(self, layer: str) -> bool:
+        """Is that layer actually heartbeating?
+
+        `command()` publishes and returns whether the SEND succeeded, which on
+        a fire-and-forget socket is true with nobody listening. Anything that
+        reports back an action as done -- rather than as sent -- has to check
+        this first, or it asserts a change that never reached anyone."""
+        with self.lock:
+            s = self.status.get(layer)
+        return bool(s) and (time.time() - s["t_unix"] < 4.0)
 
     # -- snapshot ----------------------------------------------------------
     def state(self) -> dict:
@@ -385,7 +396,7 @@ def create_app(cfg: cfgmod.Config):
     # reason it happens once, on the ground, rather than per frame.
 
     @app.post("/api/map")
-    async def upload_map(file: UploadFile = File(...)):
+    async def upload_map(file: UploadFile = File(...), apply: bool = Form(False)):
         name = Path(file.filename or "map.tif").name          # no path from the wire
         if not name.lower().endswith((".tif", ".tiff", ".png", ".jpg", ".jpeg")):
             raise HTTPException(400, "expected a GeoTIFF, or a PNG/JPG with a sidecar")
@@ -415,7 +426,81 @@ def create_app(cfg: cfgmod.Config):
             info["warning"] = ("no projected CRS. The pipeline needs a UTM (or "
                                "similar) GeoTIFF; a plain image with a .tif "
                                "extension loads and matches against nothing.")
+        info["preview_url"] = f"/api/map/preview?path={info['path']}"
+
+        # APPLYING IT IS A SEPARATE STEP, and before this it did not happen at
+        # all. Uploading wrote a file to data/uploads and returned its CRS --
+        # nothing switched the live reference and nothing rebuilt the feature
+        # store, so the pipeline carried on matching against the old map while
+        # the operator had every reason to believe they had changed it. The
+        # only visible sign was that the numbers did not change.
+        info["applied"] = False
+        if apply:
+            if not info.get("projected"):
+                info["apply_error"] = ("refusing to apply a map with no projected "
+                                       "CRS -- it would match against nothing.")
+            elif not hub.live("data"):
+                # NOT just "did the send succeed". The control socket is
+                # fire-and-forget, so a publish into an empty room succeeds and
+                # would let this report the reference as switched when nothing
+                # received the instruction.
+                info["apply_error"] = ("the data layer is not running, so nothing "
+                                       "received the change. Start the pipeline "
+                                       "and upload again.")
+            elif not hub.command("data", {"cmd": "set",
+                                          "path": "data_layer.map.source",
+                                          "value": info["path"]}):
+                info["apply_error"] = "the data layer's control socket refused the command"
+            else:
+                # Rebuilding is the slow part -- detect over every tile of a
+                # new reference -- and it happens in the data layer, so this
+                # returns as soon as the command is queued. Watch DL-08/DL-10
+                # in the log, or /api/state's map packet, for the new store.
+                hub.command("data", {"cmd": "rebuild_map"})
+                info["applied"] = True
+                info["note"] = ("reference switched and a store rebuild queued. "
+                                "The tile store is rebuilt in the data layer; "
+                                "watch DL-08/DL-10 or the map packet in "
+                                "/api/state for the new store id.")
         return info
+
+    @app.get("/api/map/preview")
+    def map_preview(path: str, px: int = 900):
+        """A downscaled PNG of a map file, so an upload can be LOOKED AT.
+
+        /api/map.png shows the store the pipeline is currently matching
+        against. That is the right thing after a map has been applied and no
+        help at all before it: an operator who has just uploaded a tile needs
+        to see that tile, to check it covers the ground they mean to fly over,
+        while deciding whether to apply it."""
+        # Only inside data/, and only a real file. `path` arrives from the wire.
+        root = cfgmod.REPO_ROOT / "data"
+        try:
+            target = (cfgmod.REPO_ROOT / path).resolve()
+            target.relative_to(root.resolve())
+        except (ValueError, OSError):
+            raise HTTPException(400, "path must be inside data/")
+        if not target.is_file():
+            raise HTTPException(404, f"no such file: {path}")
+        try:
+            import cv2
+            import numpy as np
+            import rasterio
+            with rasterio.open(target) as ds:
+                scale = max(1, int(max(ds.width, ds.height) / max(px, 64)))
+                out_h, out_w = max(1, ds.height // scale), max(1, ds.width // scale)
+                a = ds.read(indexes=[1, 2, 3][:ds.count], out_shape=(min(3, ds.count), out_h, out_w))
+            img = np.transpose(a, (1, 2, 0))
+            img = img[:, :, ::-1] if img.shape[2] == 3 else cv2.cvtColor(img[:, :, 0], cv2.COLOR_GRAY2BGR)
+            ok, buf = cv2.imencode(".png", img)
+            if not ok:
+                raise HTTPException(500, "could not encode a preview")
+            return Response(bytes(buf), media_type="image/png",
+                            headers={"Cache-Control": "no-store"})
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(422, f"could not read {path} as an image: {exc}")
 
     @app.post("/api/control")
     async def control(body: dict):

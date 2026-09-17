@@ -99,15 +99,31 @@ export default function Page() {
   const records = state.records || [];
   const rows = useMemo(() => toRows(records), [records]);
   const budget = state.config?.processing_layer?.latency_budget_ms ?? 250;
+  // THE BANNER MUST DESCRIBE THE FEED THAT IS RUNNING, not a key left over in
+  // the config file. `data_layer.feed.path` is `demo/flight.mp4` in
+  // system.yaml and NOTHING CLEARS IT: a gz, uvc, rtsp or env80 feed sets
+  // `type` (and `topic`/`device`/`url`) and leaves `path` exactly where it
+  // was. So this fired on every non-file run -- including the Gazebo flights,
+  // where the ground texture and the reference map are deliberately DIFFERENT
+  // captures 2.2 years apart and the runner refuses to start if they are not.
+  // It told the reader to discard numbers that were real.
+  //
+  // The warning is still correct for what it was written for: a `file` feed
+  // playing demo/flight.mp4, whose frames were cut from the reference image.
+  const feedType = state.config?.data_layer?.feed?.type || 'file';
   const synthetic = state.header?.synthetic_from_reference
-    || String(state.config?.data_layer?.feed?.path || '').includes('demo/flight');
+    || (feedType === 'file'
+        && String(state.config?.data_layer?.feed?.path || '').includes('demo/flight'));
 
   const cfg = useMemo(() => ({
     ...CFG,
     latency_budget_ms: budget,
     inlier_gate: state.config?.processing_layer?.inlier_gate ?? CFG.inlier_gate,
-    loop_mode: state.config?.output_layer?.fc?.loop_mode ?? 'off',
-  }), [budget, state.config]);
+    // Live value first -- see the note in ControlBar. The snapshot is the
+    // boot-time YAML and does not move when the loop mode does.
+    loop_mode: state.layers?.output?.status?.config?.loop_mode
+      ?? state.config?.output_layer?.fc?.loop_mode ?? 'off',
+  }), [budget, state.config, state.layers]);
 
   // The bands the map and the graphs colour against are the RUNNING config's,
   // not the file's defaults -- and so are the sentences describing them. The
@@ -379,7 +395,7 @@ export default function Page() {
       {/* ── configuration ─────────────────────────────────────────────── */}
       {mode === 'live' && (
         <ControlBar layers={state.layers} methods={methods} disabled={!connected}
-                    loopMode={cfg.loop_mode} Panel={Panel} />
+                    loopMode={cfg.loop_mode} config={state.config} mapPacket={state.map} Panel={Panel} />
       )}
 
       {/* ── pipeline ──────────────────────────────────────────────────── */}
