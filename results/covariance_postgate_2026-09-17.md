@@ -42,6 +42,70 @@ Two independent routes to the same place: restricting the harness data to
 low-error rows gives 0.220, and measuring the real post-gate population gives
 0.185. They agree.
 
+### Re-taken on the complete sweep — the signal is not weak, it is absent
+
+The numbers above were taken while two scenes were still sweeping. All ten
+CSVs are now in `results/train_sweep`, and the retrained models are **worse,
+not better**:
+
+| method | n | scenes | Spearman | p |
+|---|---|---|---|---|
+| `edgepoint2_s64` | 156 | 4 | **−0.032** | 0.7 |
+| `xfeat_mnn` | 145 | 4 | **0.003** | 0.97 |
+
+Both are indistinguishable from zero. **On the population this estimator is
+actually for — fixes that already passed the gate — it does not order error at
+all.**
+
+The leave-one-scene-out breakdown says why, and it is the same story for both:
+
+```
+                 held out    n   med pred   med actual   ratio
+edgepoint2_s64   Scene_09   43       6.76         2.78    2.43
+                 Scene_10   82       5.29         3.84    1.38
+                 Scene_16   27       2.08        10.71    0.19
+xfeat_mnn        Scene_09   67      10.45         3.02    3.46
+                 Scene_10   36      29.81         3.48    8.56
+                 Scene_16   38       2.99        10.17    0.29
+```
+
+**Scene_16 is inverted and it is inverted on both methods** — the model calls
+it the most confident scene and it is the worst one. Scene_09 and Scene_10 are
+over-estimated by 1.4–8.6x in the other direction. So the model has not learned
+a weak ordering, it has learned a **scene-identity ordering that is wrong on
+the held-out scene**, which is exactly the failure mode `CLAUDE.md` warns about
+under "cross-validate grouped by scene, never by row" — and the grouping is
+what exposed it.
+
+The out-of-fold calibration table shows the same thing from the other side.
+For `edgepoint2_s64` the *lowest* predicted-sigma bin has the *highest* median
+actual error:
+
+```
+    pred sigma     n   median actual m   p90 actual m
+          2.06    38              5.95         17.22
+          4.98    38              3.78          4.58
+          5.52    38              3.88          5.92
+          8.45    38              3.26        136.85
+```
+
+The one property that survives is in the last column: the p90 of the
+highest-sigma bin is 136.85 m against 17.22 m for the lowest. **The model still
+finds the tail even though it has lost the middle** — which is, once more, the
+rejection problem rather than the covariance one.
+
+### What this changes
+
+The deflation in this document was stated as "closer to 0.2". On complete data
+it is **zero**. Everything below about calibration-not-discrimination still
+holds and is now the *only* defensible claim for the learned estimator:
+it gets the magnitude into the right range, and it does not rank within it.
+
+This does not touch `CLAUDE.md`'s THE FINDING, which is measured on the
+*pre-gate* harness population and is about Eq. 7's saturation and
+descriptor-specificity. It does mean the learned estimator should be described
+as a **magnitude model**, never as a confidence ranking.
+
 ## What this does and does not overturn
 
 **It does not overturn the finding.** "Rejection and covariance are different
@@ -82,12 +146,20 @@ directly. Three reasons it is preferred over `--root`:
 
 ## Caveats on this measurement
 
-- **n is small**: 141–152 post-gate rows across 3 scenes, against the harness's
-  439 across 4. Scene_21 and Scene_22 were still sweeping when this was
-  written; the numbers should be re-taken with all five.
+- **n is small**: 145–156 post-gate rows on complete data. And "4 scenes"
+  overstates it — **Scene_22 contributes 4 rows**, so leave-one-scene-out is
+  really three scenes deep and never reports Scene_22 as a fold. Scene_21 is
+  excluded per `CLAUDE.md`. Three effective scenes is thin for a group-wise
+  claim in either direction, including this document's negative one.
+- **The retrain used the same features and the same splits as the first pass**,
+  so the move from 0.185 to 0.003 is data, not method.
 - **"error ≤ 20 m" is a proxy for the post-gate population, not the population
   itself.** The gate is on inliers, not on error. The direct runtime-sweep
   measurement is the better evidence and it agrees.
-- **Scene_16 is badly predicted by both methods** (predicted 2.5–3.0 m, actual
-  10.2–10.7 m). With three scenes, holding it out leaves two to train on, and
-  `CLAUDE.md`'s group-identity warning applies.
+- **Scene_16 is badly predicted by both methods** (predicted 2.1–3.0 m, actual
+  10.2–10.7 m). With three effective scenes, holding it out leaves two to train
+  on, and `CLAUDE.md`'s group-identity warning applies.
+- **More scenes is the obvious next move and may not rescue it.** The failure
+  is not noise — both methods invert the same scene in the same direction,
+  which reads as a real property of Scene_16 that the eight features do not
+  carry.
