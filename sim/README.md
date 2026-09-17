@@ -90,12 +90,12 @@ your flight area is farmland, treat it as untested.
 
 ## What it produced
 
-`results/sim_fixedwing_2026-09-17.md`, first full run, 481 accepted fixes:
+`results/sim_fixedwing_2026-09-17.md`, 139 accepted fixes:
 
-    error   median 6.60 m, p90 7.86, p99 11.97, max 14.82
-            98% within 10 m, 100% within 20 m
-    inliers median 75 (13-190)
-    latency median 63.2 ms, p95 97.6 ms against a 250 ms budget
+    error   median 3.35 m, p90 6.32, p99 9.89, max 10.30
+            73% within 5 m, 99% within 10 m, 100% within 20 m
+    inliers median 86 (9-128)
+    latency median 97.6 ms, p95 159.8 ms against a 250 ms budget
 
 and in PX4:
 
