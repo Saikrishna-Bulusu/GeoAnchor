@@ -1741,6 +1741,134 @@ Both are fixed the same way, and the script now does three things about it:
 
 ---
 
+## 17 Sept 2026: PX4, RIPE++, the cross-date answer, and the top_k front
+
+Four results, each with its own document. Two of them reverse things stated
+above; read the reversals first.
+
+### PX4 has a rate floor. ArduPilot does not. (REVERSES a standing claim)
+
+`docs/px4_ekf2_extnav_2026-09-17.md`. EKF2 fuses our ExternalNav fixes -- 20 m
+injected, GNSS off, the estimator walks to 19.74 m -- **but only at 5 Hz and
+above.** `EV_MAX_INTERVAL = 200e3` us (`EKF/common.h:71`) gates *starting* the
+aid source, and below it nothing complains: the aid source publishes every
+frame with `innovation_rejected: false` and a test ratio of 0.00003, and only
+`fused: false` says otherwise.
+
+Measured on fresh boots, three passes of the band:
+
+    4 Hz   250 ms    0.00 /  0.00 / -0.01     no
+    5 Hz   200 ms   19.74 / 19.96 / 19.50     FUSED
+    6 Hz   166 ms   20.47 / 19.92 / 20.27     FUSED
+   10 Hz   100 ms   -0.01 / 20.28 / 19.92     FUSED    <- pass 1 was noise
+   20 Hz    50 ms   19.90 / 19.92 / 20.26     FUSED
+
+**This contradicts "EKF3 will take our rate" above, for PX4 only.** The Xavier
+replay is 2.4 Hz and `xfeat_lighterglue` is 0.47 Hz, so on PX4 most measured
+configurations of this pipeline would be silently ignored. Publishing the most
+recent fix faster than it is solved would work around it, but that is a change
+in what the filter is being told and has not been decided.
+
+Three encoding differences, all silent BOTH ways, all verified against v1.16.2
+source and then a live estimator. `scripts/test_fc_encoding.py` now asserts all
+of it, 23 checks.
+
+| | ArduPilot | PX4 |
+|---|---|---|
+| pose covariance | sums cov[0]+cov[6]+cov[11] | reads cov[0], cov[6] PER AXIS |
+| frame | **only** LOCAL_FRD (20) | wants LOCAL_NED; rotates an FRD sample |
+| INT32 parameter | plain REAL32 | the integer's **bit pattern** |
+
+ArduPilot's covariance split on PX4 gives it sigma/sqrt(2), **29% too tight** --
+the direction that makes the filter trust a bad fix more. LOCAL_FRD on PX4
+turned a 20 m injection into an observation of -0.04 m, because EKF2 rotates an
+FRD sample by an estimated EV-to-EKF rotation when the source claims no yaw,
+and this pipeline sends an identity quaternion. `fcout.py` picks both from
+`firmware`, which is now validated rather than free-form.
+
+**PX4 gives the covariance estimator MORE range than EKF3**: no upper clamp at
+all, where EKF3 clamps to [0.01, 100] m.
+
+`bash scripts/px4_sitl.sh` runs the whole thing -- SIH, so no Gazebo needed.
+
+### The cross-date cliff is land cover, not the matcher (BREAKS the question)
+
+`results/crossdate_cities_2026-09-17.md`. Four areas, every control passing:
+
+    rural farmland (Griffith)   works at EVERY gap out to 8.8 yr, 118-443 inliers
+    Brisbane / Perth / Melbourne CBD   not monotonic, 1-4 of 8-12 gaps, 5-38 inliers
+
+**A city ought to be the easy case and is the hard one.** What changes between
+two satellite passes over a CBD is the apparent geometry of tall structures --
+facade parallax with view angle, shadow with sun angle -- not the ground. Flat
+farmland has neither. So **how stale the reference map may be is a question
+about the flight area**, and the three-year figure in
+`results/crossdate_wayback_curve.md` is a Sydney-CBD number that must not be
+carried anywhere else.
+
+Two methodology faults found doing it, both of which also affect that earlier
+curve:
+
+- **The x-axis is publication date, not acquisition date.** Wayback labels a
+  capture with when Esri PUBLISHED a basemap version; a release can republish
+  older imagery. That is why three of four areas are non-monotonic -- Perth
+  solves 24/24 at 0.7 yr, 0/24 at 1.6, 13/24 at 2.6. `scripts/
+  wayback_source_meta.py` reads the real `SRC_DATE`, `SRC_RES`, `SRC_DESC` and
+  `SRC_ACC` from Esri's per-release metadata services.
+- **Fixed zoom is not fixed resolution.** Web Mercator scale goes as 1/cos(lat)
+  -- 0.2644 m/px at Brisbane against 0.2356 at Melbourne -- and the NATIVE
+  source differs per area (Melbourne is 0.31 m WorldView-3, upsampled). Within
+  an area both are constant, which is why the land-cover conclusion stands.
+
+And a plain bug: `fetch_wayback_tile.py` ended its CRS resolution with a
+hardcoded `EPSG:32756`, Sydney's UTM zone, for every `--bbox` fetch. Perth
+would have been **37 degrees outside its zone**. Now derived from the bbox.
+
+### `xfeat_lg` is DOMINATED at every top_k, not merely too slow
+
+`results/topk_front.json`, `scripts/topk_front.py`. The sweeps already held
+accuracy per k and nothing had read them -- the missing piece was never a run.
+Each point is scored at THAT method's own best gate, because a shared gate
+compares gate choice rather than matcher.
+
+`xfeat_lg` never reaches the front on either scene: 1780-9095 ms p95 for
+1.5-4.5% accept on Scene_09, against `edgepoint2_s64` k=2048 at 23.1% for
+684 ms. **There is no budget at which it is the right choice.**
+`edgepoint2_s64` owns the whole Scene_10 front, and k=2048 is the only point
+that both fits 250 ms (201 ms p95) and accepts usefully (40.1%).
+
+### RIPE++: zero on env80, and the control proves it
+
+`results/ripepp_env80_2026-09-17.md`. Registered as `ripepp` /`ripepp_tokyo` /
+`ripepp_scared`. **Zero plausible solves in 25 env80 frames** -- and the
+same-tile control gives 112 inliers, 6/6, 0.000 m, BEATING `edgepoint2_s64`'s
+93 on the same task. So the adapter is right and the transfer failure is real:
+all three checkpoints are MegaDepth / Tokyo / endoscopy, none aerial, none
+cross-view.
+
+Ruled out for deployment twice over regardless of accuracy. **Licence:**
+Fraunhofer academic-use-only, non-commercial -- the first non-permissive
+matcher here, measurable but never shippable. **Compute:** detection is 2666 ms
+against XFeat's 34.3 on the same frame, because the backbone is VGG19-BN; its
+256-D descriptor also quadruples the reference store.
+
+What survives is the reason it was worth trying: it learns from positive pairs
+only and ships its own trainable matcher, which is the one fine-tuning path
+that does not break its matcher the way fine-tuning XFeat breaks LighterGlue.
+
+### The logs repo sorts by board then method
+
+`board/<board>/<method>/<stamp>_<tag>/`, migrated with `git mv` so no file lost
+its history. `geoanchor/log_layout.py` owns the classification and both
+`sync_logs.sh` and `/api/fleet` defer to it. The README records the thing
+nobody had written down: **39 of the 40 runs there are
+`synthetic_from_reference`**, frames cut from the tile they are matched
+against, so their 0.006 m is a wiring proof. Exactly one run has real ground
+truth.
+
+`sync_logs.sh` also grew a 32 MB per-run size guard -- one looping replay had
+reached 402 MB across 337k JSONL lines, which in git is permanent.
+
 ## Open, in order
 
 1. **Get an altitude source onto the live-camera rig.** With intrinsics
