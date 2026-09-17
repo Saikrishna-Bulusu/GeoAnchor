@@ -26,3 +26,8 @@ fleet/
 # forbids commercial use -- it does not belong in this repo's history. Clone it
 # yourself, or set RIPEPP_ROOT. geoanchor/methods.py::RIPEppMethod finds it.
 ripepp/
+
+# Trained covariance models. Small (260 KB) and reproducible from
+# scripts/train_covariance.py, but they are BUILD ARTEFACTS of the parent
+# repo's results/s8_train, which is not in this repo.
+models/
