@@ -374,6 +374,133 @@ class Env80Feed(Feed):
                 "fps": self.fps, "local_frame": True}
 
 
+class GzFeed(Feed):
+    """A camera sensor inside Gazebo, over gz-transport.
+
+    The simulator's counterpart to UvcFeed, and it inherits that class's one
+    hard-won lesson: **the newest frame, never a queued one.** Gazebo renders
+    at its own rate regardless of what the matcher is doing, so a callback that
+    appended to a list would build a backlog and hand the pipeline a frame
+    seconds old, stamped as current -- which is precisely the failure
+    CLAUDE.md warns about, because ArduPilot's writeExtNavData does
+    MAX(timeStamp_ms, imuDataDelayed.time_ms) and fuses a late fix at the wrong
+    time. So the callback keeps exactly one frame and read() takes it.
+
+    THE TIMESTAMP IS THE SIMULATOR'S, NOT THE WALL CLOCK. gz stamps each image
+    with sim time, and PX4 SITL runs in lockstep, so sim time and wall time
+    drift apart whenever the renderer or the matcher stalls. Reporting
+    time.time() here would hide exactly the staleness this feed exists to
+    measure. `capture_age_ms` is therefore the gap between the frame's sim
+    stamp and the newest sim stamp seen, not an age against the wall clock.
+
+    NOT IMPORTED UNLESS USED. gz-transport is a simulator dependency and has no
+    business on an aircraft; the import is inside __init__ so a Pi that never
+    sets `feed.type: gz` never loads it, the same way rasterio and torch are
+    kept out of the flight path elsewhere in this layer.
+    """
+    kind = "gz"
+
+    _DEAD_AFTER_S = 5.0        # generous: Gazebo stalls while it loads a world
+
+    def __init__(self, topic: str, timeout_s: float = 30.0):
+        import threading
+        try:
+            from gz.transport13 import Node
+            from gz.msgs10.image_pb2 import Image as GzImage
+        except ImportError as exc:
+            raise FeedError(
+                "DLE-01",
+                f"gz-transport Python bindings not importable ({exc}).\n"
+                "  They are APT packages and this venv does not see them by "
+                "default:\n"
+                "      sudo apt install python3-gz-transport13 python3-gz-msgs10\n"
+                "      PYTHONPATH=/usr/lib/python3/dist-packages bash run.sh\n"
+                "  The venv's python and the system python are both 3.12 on "
+                "Ubuntu 24.04, so\n  the ABI matches and the system path simply "
+                "works -- verified. Also note ROS 2's\n  vendored `gz` on PATH "
+                "shadows the real binary, which makes `gz sim` report that\n"
+                "  Gazebo is not installed when it is.") from exc
+
+        self.topic = str(topic)
+        self._GzImage = GzImage
+        self._lock = threading.Lock()
+        self._latest = None            # (frame_bgr, sim_t, seq)
+        self._newest_sim_t = 0.0
+        self._count = 0
+        self._last_rx = time.monotonic()
+
+        self._node = Node()
+        if not self._node.subscribe(GzImage, self.topic, self._on_image):
+            raise FeedError("DLDE-02", f"could not subscribe to gz topic '{self.topic}'. "
+                                       "`gz topic -l` lists what is actually published.")
+
+        # Wait for the FIRST frame rather than returning a feed that is not
+        # yet delivering: Gazebo takes seconds to load a world and render, and
+        # a data layer that starts publishing nothing looks like a dead camera.
+        deadline = time.monotonic() + float(timeout_s)
+        while time.monotonic() < deadline:
+            with self._lock:
+                if self._latest is not None:
+                    break
+            time.sleep(0.05)
+        else:
+            raise FeedError("DLDE-03", f"no image on '{self.topic}' within {timeout_s:g}s. "
+                                       "Is the world running, and does the model carry a camera?")
+        with self._lock:
+            f = self._latest[0]
+        self.actual = {"width": f.shape[1], "height": f.shape[0]}
+
+    def _on_image(self, msg):
+        try:
+            h, w = msg.height, msg.width
+            buf = np.frombuffer(msg.data, dtype=np.uint8)
+            fmt = msg.pixel_format_type
+            # 3 == RGB_INT8, 1 == L_INT8 in gz.msgs. Anything else is a format
+            # the world was configured for and this code has not been told
+            # about; say so rather than reshaping garbage.
+            if buf.size == h * w * 3:
+                frame = cv2.cvtColor(buf.reshape(h, w, 3), cv2.COLOR_RGB2BGR)
+            elif buf.size == h * w:
+                frame = cv2.cvtColor(buf.reshape(h, w), cv2.COLOR_GRAY2BGR)
+            else:
+                return
+            sim_t = msg.header.stamp.sec + msg.header.stamp.nsec * 1e-9
+            with self._lock:
+                self._latest = (frame, sim_t, self._count)
+                self._newest_sim_t = max(self._newest_sim_t, sim_t)
+                self._count += 1
+                self._last_rx = time.monotonic()
+        except Exception:
+            # A malformed message must not kill the subscriber thread and take
+            # the feed down with it.
+            return
+
+    def read(self) -> tuple:
+        with self._lock:
+            latest, newest, n = self._latest, self._newest_sim_t, self._count
+            self._latest = None
+            last_rx = self._last_rx
+        if latest is None:
+            if time.monotonic() - last_rx > self._DEAD_AFTER_S:
+                raise FeedError("DLDE-03", f"no image on '{self.topic}' for "
+                                           f"{self._DEAD_AFTER_S:g}s -- Gazebo stopped or "
+                                           "the world was unloaded")
+            return None, None, {}
+        frame, sim_t, seq = latest
+        age_ms = max(0.0, (newest - sim_t) * 1000.0)
+        return frame, time.time(), {
+            "source": "gz", "topic": self.topic, "seq": seq, "frames_seen": n,
+            "sim_time_s": round(sim_t, 4),
+            # Sim time, not wall time -- see the class docstring.
+            "capture_age_ms": round(age_ms, 1),
+        }
+
+    def describe(self) -> dict:
+        d = {"kind": "gz", "topic": self.topic, "frames_seen": self._count}
+        d.update(getattr(self, "actual", {}))
+        return d
+
+
 def open_feed(cfg: dict) -> Feed:
     kind = cfg.get("type", "file")
     if kind == "file":
@@ -385,6 +512,8 @@ def open_feed(cfg: dict) -> Feed:
                        cfg.get("fourcc", "MJPG"))
     if kind == "rtsp":
         return RtspFeed(cfg["url"])
+    if kind == "gz":
+        return GzFeed(cfg["topic"], cfg.get("timeout_s", 30.0))
     if kind == "env80":
         return Env80Feed(
             cfg["scene_dir"], cfg.get("frames_dir"), cfg.get("mode", "satellite"),

@@ -9,6 +9,10 @@ pymavlink                        # actual GPS in, predicted position out
 fastapi
 uvicorn[standard]
 websockets                       # uvicorn answers a WS upgrade with 403 without it
+python-multipart                 # FastAPI needs it for UploadFile; without it a
+                                 # map upload fails with a RuntimeError at request time,
+                                 # not at import, so the dashboard looks broken rather
+                                 # than the dependency missing.
 pillow
 tqdm                             # NOT ours: accelerated_features/modules/xfeat.py imports it
                                  # at module scope. methods.XFeatMethod.available() checks only

@@ -36,7 +36,7 @@ from ..bus import CommandClient, Subscriber
 # for that closes the socket instead of raising, so the browser sees a bare
 # HTTP 403 on the upgrade with no traceback anywhere. Cost an hour once.
 try:
-    from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+    from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse, JSONResponse, Response
     from fastapi.staticfiles import StaticFiles
@@ -324,6 +324,98 @@ def create_app(cfg: cfgmod.Config):
                                  "records": rows})
         return FileResponse(latest / "session.json", media_type="application/json",
                             filename=f"{latest.name}_session.json")
+
+    # ------------------------------------------------------- covariance ----
+    # The covariance backend is LIVE-switchable: the processing layer rebuilds
+    # the estimator whenever a `set processing_layer.covariance.*` arrives, so
+    # this needs no restart. What it does need is for the operator to see WHICH
+    # MATCHER each model was trained on, because applying an XFeat-trained
+    # model to EdgePoint2 is exactly the failure this project documents -- a
+    # system that swaps matchers silently inherits a covariance model that no
+    # longer works. Hence `matches_current`, and hence the models advertise
+    # their own provenance rather than being an opaque list of filenames.
+
+    @app.get("/api/covariance")
+    def covariance():
+        import pickle
+        root = cfgmod.REPO_ROOT / "models"
+        cur = (cfg.section("processing_layer") or {}).get("covariance", {}) or {}
+        cur_method = (cfg.section("processing_layer") or {}).get("method")
+        models = []
+        for f in sorted(root.glob("*.pkl")) if root.is_dir() else []:
+            entry = {"path": f"models/{f.name}", "name": f.stem,
+                     "size_kb": round(f.stat().st_size / 1024)}
+            try:
+                with open(f, "rb") as fh:
+                    blob = pickle.load(fh)
+                meta = blob.get("meta", {}) if isinstance(blob, dict) else {}
+                trained_on = meta.get("matcher_filter") or "unstated"
+                entry.update(
+                    trained_on=trained_on,
+                    features=(blob.get("features") if isinstance(blob, dict) else None),
+                    validation=meta.get("validation", "unstated"),
+                    scenes=meta.get("scenes"), n_train=meta.get("n_train"),
+                    source=meta.get("source"),
+                    # A string compare, deliberately loose: the harness names a
+                    # matcher XFEAT_MNN and the runtime names it xfeat_mnn.
+                    matches_current=bool(
+                        cur_method and trained_on
+                        and trained_on.lower().replace("-", "_") == str(cur_method).lower()))
+            except Exception as exc:
+                entry["error"] = f"unreadable: {exc}"
+            models.append(entry)
+        return {
+            "backends": ["gate_only", "learned"],
+            "current": {"backend": cur.get("backend", "gate_only"),
+                        "model_path": cur.get("model_path"),
+                        "fixed_sigma_m": cur.get("fixed_sigma_m"),
+                        "clamp_m": cur.get("clamp_m")},
+            "current_method": cur_method,
+            "models": models,
+            "note": ("gate_only emits a fixed sigma and labels itself a placeholder "
+                     "in every record. `learned` needs a model trained on the SAME "
+                     "matcher -- see matches_current."),
+        }
+
+    # ------------------------------------------------------------- map ----
+    # Uploading a reference map is what a real operator does on the ground
+    # before a flight: point the system at imagery of where it is about to fly.
+    # The file is written into data/uploads and the data layer is told to
+    # rebuild its feature store from it, which is the expensive step and the
+    # reason it happens once, on the ground, rather than per frame.
+
+    @app.post("/api/map")
+    async def upload_map(file: UploadFile = File(...)):
+        name = Path(file.filename or "map.tif").name          # no path from the wire
+        if not name.lower().endswith((".tif", ".tiff", ".png", ".jpg", ".jpeg")):
+            raise HTTPException(400, "expected a GeoTIFF, or a PNG/JPG with a sidecar")
+        dest_dir = cfgmod.REPO_ROOT / "data" / "uploads"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / name
+        size = 0
+        with open(dest, "wb") as fh:
+            while chunk := await file.read(1 << 20):
+                size += len(chunk)
+                fh.write(chunk)
+        info = {"path": f"data/uploads/{name}", "bytes": size}
+        # Report the georeference back, because a map WITHOUT one is the
+        # failure mode that matters: ap_vo2 and this pipeline both require a
+        # projected CRS and fail silently on a plain image with a .tif suffix.
+        try:
+            import rasterio
+            with rasterio.open(dest) as ds:
+                info.update(width=ds.width, height=ds.height,
+                            crs=str(ds.crs) if ds.crs else None,
+                            gsd_m_px=abs(ds.transform.a) if ds.crs else None,
+                            georeferenced=bool(ds.crs),
+                            projected=bool(ds.crs and not ds.crs.is_geographic))
+        except Exception as exc:
+            info.update(georeferenced=False, error=str(exc))
+        if not info.get("projected"):
+            info["warning"] = ("no projected CRS. The pipeline needs a UTM (or "
+                               "similar) GeoTIFF; a plain image with a .tif "
+                               "extension loads and matches against nothing.")
+        return info
 
     @app.post("/api/control")
     async def control(body: dict):
