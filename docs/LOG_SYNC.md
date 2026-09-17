@@ -11,7 +11,7 @@ all of them in one list.
 | repo | holds | who writes |
 |---|---|---|
 | `geoanchor-rt` | the code, configs, docs | whoever is developing |
-| `geoanchor-logs` | session transcripts, one directory per device | every device, automatically |
+| `GeoAnchor-logs` | session transcripts, one directory per device | every device, automatically |
 
 **Why not one repo.** A session is ~100 KB and every board writes them
 continuously. In the code repo they would bloat history permanently, and every
@@ -30,7 +30,7 @@ are rebuildable or downloadable and do not belong in git.
 Create the logs repo once, from any machine:
 
 ```bash
-gh repo create Saikrishna-Bulusu/geoanchor-logs --private
+gh repo create Saikrishna-Bulusu/GeoAnchor-logs --private
 ```
 
 Then on **each** device:

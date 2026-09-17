@@ -36,7 +36,7 @@ REPO="$PWD"
 # is what is present on these boards. An SSH default fails on a headless board
 # with "Host key verification failed", which reads as a permissions problem
 # rather than as a missing key. Override with GEOANCHOR_LOGS_REMOTE.
-LOGS_REMOTE="${GEOANCHOR_LOGS_REMOTE:-https://github.com/Saikrishna-Bulusu/geoanchor-logs.git}"
+LOGS_REMOTE="${GEOANCHOR_LOGS_REMOTE:-https://github.com/Saikrishna-Bulusu/GeoAnchor-logs.git}"
 FLEET_DIR="${GEOANCHOR_FLEET_DIR:-$REPO/fleet}"
 DEVICE="${GEOANCHOR_DEVICE:-$(hostname -s)}"
 PULL_ONLY=0
@@ -74,7 +74,7 @@ if [ ! -d "$FLEET_DIR/.git" ]; then
   if ! git clone "$LOGS_REMOTE" "$FLEET_DIR" 2>&1 | sed 's/^/  /'; then
     echo
     echo "Clone failed. If the repo does not exist yet, create it once:"
-    echo "    gh repo create Saikrishna-Bulusu/geoanchor-logs --private"
+    echo "    gh repo create Saikrishna-Bulusu/GeoAnchor-logs --private"
     echo "Then re-run. Until then this device keeps its runs locally and"
     echo "nothing is lost -- runs/ is the source of truth, fleet/ is a mirror."
     exit 1

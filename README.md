@@ -285,7 +285,7 @@ Three repos, on purpose:
 | repo | holds |
 |---|---|
 | `geoanchor-rt` | this — the code, configs, docs |
-| `geoanchor-logs` | session transcripts, one directory per device |
+| `GeoAnchor-logs` | session transcripts, one directory per device |
 | `geoanchor-research` | the harness, the numbered steps, the analysis output |
 
 Transcripts are ~100 KB per run and every board writes them continuously. In
