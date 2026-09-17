@@ -1,0 +1,18 @@
+[
+  {
+    "method": "edgepoint2_s64",
+    "label": "EdgePoint2 Small (64-D)",
+    "query": "/home/sai/GeoAnchor/geoanchor-rt/data/crossdate/brisbane/ref_tile_2025-12-18.tif",
+    "reference": "/home/sai/GeoAnchor/geoanchor-rt/data/crossdate/brisbane/ref_tile_2025-12-18.tif",
+    "query_gsd_m": 0.2644,
+    "reference_gsd_m": 0.2644,
+    "frames": 24,
+    "inliers_median": 119,
+    "inliers_max": 173,
+    "solved": 24,
+    "plausible": 24,
+    "median_error_m": 0.021,
+    "p90_error_m": 0.035,
+    "max_error_m": 0.055
+  }
+]

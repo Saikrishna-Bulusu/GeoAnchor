@@ -1,0 +1,18 @@
+[
+  {
+    "method": "edgepoint2_s64",
+    "label": "EdgePoint2 Small (64-D)",
+    "query": "/home/sai/GeoAnchor/geoanchor-rt/data/crossdate/rural_griffith/ref_tile_2026-08-05.tif",
+    "reference": "/home/sai/GeoAnchor/geoanchor-rt/data/crossdate/rural_griffith/ref_tile_2017-10-25.tif",
+    "query_gsd_m": 0.4926,
+    "reference_gsd_m": 0.4926,
+    "frames": 24,
+    "inliers_median": 118,
+    "inliers_max": 133,
+    "solved": 24,
+    "plausible": 24,
+    "median_error_m": 0.532,
+    "p90_error_m": 0.717,
+    "max_error_m": 1.105
+  }
+]

@@ -99,15 +99,17 @@ def main() -> int:
         print(head)
         if a.md:
             print("|---|---|---|---|---|---|")
-        last_good = None
-        first_bad = None
+        # Track EVERY working gap, not just the last one. The rows are sorted
+        # by gap, so a monotonic area gives a working prefix and a failing
+        # tail; anything else is non-monotonic and a "cliff at X years" is not
+        # a description of it. An earlier version reported last_good and
+        # first_bad blindly and printed "cliff between 9.1 and 1.6 years" for
+        # Perth, which is not a statement about anything.
+        good, bad = [], []
         for gap, cap, r in d["rows"]:
             solved, med = r.get("solved", 0), r.get("median_error_m")
             ok = solved >= frames / 2 and med is not None and med <= a.usable_m
-            if ok:
-                last_good = gap
-            elif first_bad is None and last_good is not None:
-                first_bad = gap
+            (good if ok else bad).append(gap)
             ms = "--" if med is None else f"{med:.2f}"
             ps = "--" if r.get("p90_error_m") is None else f"{r['p90_error_m']:.2f}"
             mark = "" if a.md else ("  " if ok else " x")
@@ -117,29 +119,47 @@ def main() -> int:
             else:
                 print(f"  {cap:12} {gap:7.1f} {str(r.get('inliers_median')):>5} "
                       f"{solved:>3}/{frames:<3} {ms:>10} {ps:>9}{mark}")
-        cliffs[area] = (last_good, first_bad)
-        if last_good is None:
+        # Monotonic means every working gap is shorter than every failing one.
+        monotonic = (not good or not bad) or max(good) < min(bad)
+        cliffs[area] = (good, bad, monotonic)
+        if not good:
             print(f"  No gap works at all -- even the shortest fails the "
                   f"{a.usable_m:g} m / half-the-frames test.")
-        elif first_bad is None:
-            print(f"  Every measured gap works, out to {last_good:.1f} years. "
+        elif not bad:
+            print(f"  Every measured gap works, out to {max(good):.1f} years. "
                   "No cliff inside this area's capture history.")
+        elif monotonic:
+            print(f"  **Cliff between {max(good):.1f} and {min(bad):.1f} years.**")
         else:
-            print(f"  **Cliff between {last_good:.1f} and {first_bad:.1f} years.**")
+            print(f"  **NOT MONOTONIC -- there is no cliff to quote.** Works at "
+                  f"{', '.join(f'{g:.1f}' for g in good)} yr; fails at "
+                  f"{', '.join(f'{b:.1f}' for b in bad)} yr.")
+            print(f"  A short gap failing while a longer one works means ELAPSED "
+                  f"TIME IS NOT THE VARIABLE here. The likeliest reason is that "
+                  f"the axis is\n  the Wayback RELEASE date, not the acquisition "
+                  f"date -- see scripts/wayback_source_meta.py.")
 
     if len(cliffs) > 1:
         print("\n## Across areas" if a.md else "\n\033[1mAcross areas\033[0m")
-        for area, (lo, hi) in sorted(cliffs.items()):
-            where = ("no working gap" if lo is None else
-                     f"works to {lo:.1f} yr" + (f", fails by {hi:.1f}" if hi else ", no cliff seen"))
+        for area, (good, bad, mono) in sorted(cliffs.items()):
+            if not good:
+                where = "no working gap at all"
+            elif not bad:
+                where = f"works at every measured gap, out to {max(good):.1f} yr"
+            elif mono:
+                where = f"cliff between {max(good):.1f} and {min(bad):.1f} yr"
+            else:
+                where = (f"NOT MONOTONIC -- {len(good)} of "
+                         f"{len(good) + len(bad)} gaps work, out to {max(good):.1f} yr")
             print(f"  {area:18} {where}")
-        found = [lo for lo, _ in cliffs.values() if lo is not None]
-        if found:
-            print(f"\n  Working gap ranges {min(found):.1f} to {max(found):.1f} years "
-                  f"across {len(found)} areas. A cliff that lands in the same place "
-                  "everywhere is a MATCHER property;\n  one that moves with the site "
-                  "is a property of what is on the ground there, and the flight area "
-                  "decides it.")
+        mono_areas = [a_ for a_, (g, b, m) in cliffs.items() if m and g and b]
+        print("\n  A cliff in the same place everywhere would be a MATCHER property. "
+              "One that moves with\n  the site is a property of what is on the ground, "
+              "and then the flight area decides it.")
+        if len(cliffs) - len(mono_areas) > 0:
+            print("  Areas whose results are NOT monotonic cannot contribute a cliff "
+                  "location at all:\n  a shorter gap failing while a longer one works "
+                  "says the x-axis is not measuring age.")
     return 0
 
 

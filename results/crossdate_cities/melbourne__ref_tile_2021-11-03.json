@@ -1,0 +1,18 @@
+[
+  {
+    "method": "edgepoint2_s64",
+    "label": "EdgePoint2 Small (64-D)",
+    "query": "/home/sai/GeoAnchor/geoanchor-rt/data/crossdate/melbourne/ref_tile_2026-03-26.tif",
+    "reference": "/home/sai/GeoAnchor/geoanchor-rt/data/crossdate/melbourne/ref_tile_2021-11-03.tif",
+    "query_gsd_m": 0.2356,
+    "reference_gsd_m": 0.2356,
+    "frames": 24,
+    "inliers_median": 5,
+    "inliers_max": 25,
+    "solved": 7,
+    "plausible": 7,
+    "median_error_m": 14.22,
+    "p90_error_m": 20.679,
+    "max_error_m": 20.679
+  }
+]

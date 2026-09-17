@@ -1,0 +1,18 @@
+[
+  {
+    "method": "edgepoint2_s64",
+    "label": "EdgePoint2 Small (64-D)",
+    "query": "/home/sai/GeoAnchor/geoanchor-rt/data/crossdate/perth/ref_tile_2026-03-26.tif",
+    "reference": "/home/sai/GeoAnchor/geoanchor-rt/data/crossdate/perth/ref_tile_2026-03-26.tif",
+    "query_gsd_m": 0.2529,
+    "reference_gsd_m": 0.2529,
+    "frames": 24,
+    "inliers_median": 102,
+    "inliers_max": 135,
+    "solved": 24,
+    "plausible": 24,
+    "median_error_m": 0.017,
+    "p90_error_m": 0.028,
+    "max_error_m": 0.048
+  }
+]
