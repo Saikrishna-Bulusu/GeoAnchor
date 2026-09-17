@@ -1,0 +1,169 @@
+# The Pi 5 on a real Pixhawk, open loop.
+#
+#     bash scripts/pixhawk_link.sh                        # terminal 1, owns the tty
+#     python scripts/check_extnav.py --endpoint udpin:127.0.0.1:14561   # terminal 2, once
+#     GEOANCHOR_CONFIG=configs/flight.yaml bash run.sh    # terminal 2, after that passes
+#
+# WHAT THIS CHANGES FROM configs/camera.yaml, AND WHY EACH ONE
+# ------------------------------------------------------------
+# 1. gps.source: mavlink. This is the point of connecting a flight controller.
+#    The link carries the altitude the preprocessor needs to scale the frame to
+#    the reference GSD (GSD = altitude / fx_px) and the attitude the processing
+#    layer rectifies yaw by. camera.yaml had neither, which is why it fell back
+#    to a fixed 75 m and rejected every frame on PLE-08. Open item 1 in
+#    CLAUDE.md closes here: ArduPilot publishes AGL in
+#    GLOBAL_POSITION_INT.relative_alt, and the runtime already reads it.
+# 2. static_altitude_m is GONE, deliberately. A real altitude source must not
+#    have a fallback sitting behind it: a link that drops would otherwise keep
+#    producing fixes against an invented altitude and label them the same way.
+# 3. fc.enabled: true, loop_mode: open. Open loop sends the vehicle's own
+#    position back, so the message, the origin, the covariance and the
+#    acceptance logic are all exercised by something that cannot mislead the
+#    filter. Do not set closed until open has run clean for a full flight of
+#    data (bringup.md section 6).
+# 4. Both endpoints are udpin, which looks wrong and is not. MAVProxy's --out
+#    sends to that port and forwards whatever comes back, so each layer BINDS
+#    its port and replies to the sender. udpout would transmit into a socket
+#    nobody is reading and never see a heartbeat.
+#
+# ON THE FLIGHT CONTROLLER, or every fix is discarded in silence
+# --------------------------------------------------------------
+#     AHRS_EKF_TYPE   3
+#     EK3_SRC1_POSXY  6          ExternalNav
+#     EK3_SRC1_POSZ   1          baro. We never claim altitude.
+#     EK3_SRC1_YAW    1          compass. We send an identity quaternion.
+#     VISO_TYPE       1
+#     VISO_POS_X/Y/Z             camera offset from the IMU, in metres
+#     VISO_DELAY_MS              OUR measured median, 0-250. Not NGPS's 50.
+#     SERIALx_BAUD    921600     on whichever TELEM port the cable is in
+#     SERIALx_PROTOCOL 2         MAVLink2
+# check_extnav.py reads all of these back and stops at the first one that is
+# wrong, which is faster than finding out from an estimator that never moves.
+#
+# THE TWO SILENT FAILURES THIS CONFIG CANNOT PROTECT YOU FROM
+# Origin mismatch: an ExternalNav position is local, so if the EKF origin and
+# the origin the output layer used differ, every fix carries a constant offset
+# and nothing reports it. And latency: a fix later than VISO_DELAY_MS is not
+# rejected, it is stamped as current and fused at the wrong time.
+
+session:
+  tag: flight_pi5
+  runs_dir: runs
+
+bus:
+  data_pub:       ipc:///tmp/geoanchor/data.sock
+  processing_pub: ipc:///tmp/geoanchor/processing.sock
+  output_pub:     ipc:///tmp/geoanchor/output.sock
+  data_ctl:       ipc:///tmp/geoanchor/data.ctl
+  processing_ctl: ipc:///tmp/geoanchor/processing.ctl
+  output_ctl:     ipc:///tmp/geoanchor/output.ctl
+
+data_layer:
+  map:
+    source: data/sydney/ref_tile.tif
+    store_dir: stores
+    method: xfeat_mnn
+    tile_px: 1024
+    overlap_px: 128
+    max_keypoints: 2048
+    rebuild: false
+
+  feed:
+    type: uvc
+    device: 0
+    width: 1280
+    height: 720
+    fourcc: MJPG
+    # auto: the Pacer sets the publish period from measured service time, so
+    # this config does not carry a board-specific constant the Pi would inherit
+    # wrongly from the Xavier. scripts/feed_fps_sweep.sh re-measures per board.
+    fps: auto
+    fps_margin: 1.15
+    fps_bounds: [0.5, 10]
+    frame_px: 512
+    jpeg_quality: 80
+    intrinsics:
+      # C270 at 1280x720, measured 8 Sept 2026. fx scales with image width, so
+      # the flight camera needs its own run of calibrate_camera.py before any
+      # fix out of this config means metres.
+      fx_px: 1421.48
+      fy_px: 1421.03
+      cx_px: 630.01
+      cy_px: 345.72
+      dist: [0.00875, 0.80241, 0.00051, 0.00097, -2.79954]
+
+  gps:
+    source: mavlink
+    endpoint: udpin:127.0.0.1:14560
+    stale_after_s: 3.0
+    heartbeat_timeout_s: 5.0
+
+  envelope:
+    # BENCH VALUE. A Pixhawk on a desk reports 0 m AGL and every frame would
+    # die on DLE-12 before the link could be proven. Set agl_min_m to 50 before
+    # anything flies: the 50-100 m envelope is where the reference GSD holds.
+    agl_min_m: 1
+    agl_max_m: 100
+
+# ---------------------------------------------------------------------------
+processing_layer:
+  # xfeat_mnn is the variant measured to fit on the Pi 5 against a prebuilt
+  # store. xfeat_lg is more accurate on env80 and is 9.1x slower on exactly the
+  # frames it fails, which is the wrong cost profile for a budgeted loop.
+  method: xfeat_mnn
+  max_keypoints: 4096
+  min_keypoints: 30
+  min_matches: 12
+  inlier_gate: 25
+  ransac_reproj_px: 3.0
+  rectify: true
+  latency_budget_ms: 250
+  tile_ransac: true
+
+  search:
+    # A live flight has a GPS-denied prior from its own last fix, so unlike the
+    # bench this does not cold-start the whole map every frame.
+    use_prior: true
+    prior_radius_m: 100
+    cold_start_max_tiles: 0
+
+  covariance:
+    backend: gate_only
+    fixed_sigma_m: 8.0
+    clamp_m: [0.1, 100.0]
+    model_path: null
+
+# ---------------------------------------------------------------------------
+output_layer:
+  pair_window_s: 0.5
+  loss: nll
+  alarm_error_m: 50.0
+  export:
+    flush_every: 20
+
+  fc:
+    enabled: true
+    loop_mode: open
+    firmware: ardupilot
+    controller: pixhawk6c
+    endpoint: udpin:127.0.0.1:14561
+    baud: 921600
+    message: ODOMETRY
+    # From THIS reference, not from the Sydney self-match, where a picture
+    # matched against itself returns 200+ inliers and a real basemap returns
+    # 12-79.
+    min_quality_inliers: 40
+    require_no_device_errors: true
+
+  qgc:
+    # Predicted position as a second vehicle on the QGC map. Add a third
+    # --out to pixhawk_link.sh if QGC runs on another machine.
+    enabled: false
+    endpoint: udpout:127.0.0.1:14550
+    system_id: 2
+    label: GeoAnchor
+
+api:
+  host: 0.0.0.0
+  port: 8000
+  cors_origins: ["*"]
