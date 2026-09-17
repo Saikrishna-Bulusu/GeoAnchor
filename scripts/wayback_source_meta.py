@@ -167,8 +167,20 @@ def main() -> int:
             continue
         doc[name] = {"lat": lat, "lon": lon, "services_probed": n_svc,
                      "services_answering": n_hit, "acquisitions": rows}
+        coverage = n_hit / max(n_svc, 1)
         print(f"\n\033[1m{name}\033[0m  {lat:.5f}, {lon:.5f}   "
               f"{n_hit}/{n_svc} services answered, {len(rows)} distinct acquisitions")
+        # A LOW ANSWER RATE IS A RATE LIMIT, NOT A SHORT HISTORY. Esri throttles
+        # after a few hundred identify calls, and a throttled area returns a
+        # handful of acquisitions that look like a complete record -- Perth came
+        # back with 2 acquisitions on 7/196 services where Brisbane got 6 on
+        # 101/196, and Perth demonstrably has captures back to 2014. Nothing in
+        # the returned data says which it is; only this ratio does.
+        if coverage < 0.25:
+            print(f"  \033[1mINCOMPLETE\033[0m -- only {coverage:.0%} of services "
+                  f"answered. This is throttling, not a short capture history.")
+            print(f"  Re-run this area alone after a cooldown before using it.")
+            doc[name]["incomplete"] = True
         print(f"  {'acquired':10} {'native m':>9} {'sampled m':>10} "
               f"{'stated acc m':>13}  sensor")
         for r in rows:
