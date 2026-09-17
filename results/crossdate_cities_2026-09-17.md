@@ -121,6 +121,13 @@ tile-hash method counts:
 **Melbourne CBD** — 5 distinct acquisitions, native 0.46–0.50 m, all
 WorldView-2 / GeoEye-1 / Pleiades.
 
+**Brisbane CBD** — 6 distinct acquisitions from the **9 tiles** the hash method
+called distinct, native 0.31–0.50 m, stated accuracy 4.23–10 m, and its
+**newest acquisition is 2020-07-07** even though the query tile is a 2025-12-18
+release. Brisbane's cross-date table above therefore labels several pairs with
+gaps that are years wrong in both directions: releases five years apart can
+carry the same 2020 imagery, and the "0-year" query is itself five years old.
+
 Three things fall out of this, and they matter more than the resolution
 confound described above.
 
