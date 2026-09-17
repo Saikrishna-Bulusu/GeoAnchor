@@ -31,3 +31,8 @@ ripepp/
 # scripts/train_covariance.py, but they are BUILD ARTEFACTS of the parent
 # repo's results/s8_train, which is not in this repo.
 models/
+
+# PX4 SITL working directories from the AGP experiments -- parameters.bson,
+# dataman, ulog. Per-run state, same as .px4_sitl/.
+.px4_agp/
+.px4_agp_e2e/
