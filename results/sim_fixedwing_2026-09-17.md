@@ -25,21 +25,21 @@ system test.
 
 ## Result
 
-2986 frames published, **638 accepted fixes (21%)**. The aircraft was over the
-industrial fringe for this run — see "where it flies" below, which is not a
-detail.
+Properly configured — 500 m orbit, no landing item, no failsafe firing —
+1012 frames published, **139 accepted fixes (14%)**:
 
-    error   median      7.02 m
-            p90         8.39 m
-            p99        12.55 m
-            max        14.82 m
-            within 10 m  98%
+    error   median      3.35 m
+            p90         6.32 m
+            p99         9.89 m
+            max        10.30 m
+            within  5 m  73%
+            within 10 m  99%
             within 20 m 100%
 
-    inliers median 75, range 13-190
-    latency median 63.2 ms, p95 97.6 ms   (budget 250 ms)
+    inliers median 86, range 9-128
+    latency median 97.6 ms, p95 159.8 ms   (budget 250 ms)
 
-**No catastrophes.** The worst fix of 638 is 14.82 m. Every satellite run on
+**No catastrophes.** The worst fix of 139 is 10.30 m. Every satellite run on
 real AnyVisLoc data in this project contains fixes wrong by hundreds of metres
 and some by more than a kilometre; this one has none. That is a statement about
 the simulator, not about the method — a rendered view of a flat textured plane
@@ -47,9 +47,19 @@ has no relief displacement, no cloud, no seasonal change and no exposure
 difference — and it is the reason the median here must never be compared with
 the env80 table in `CLAUDE.md`.
 
-**Latency clears the budget with 150 ms to spare**, on a laptop with a
-precomputed reference feature store. The 250 ms figure that matters is still
-the one measured on the target board.
+**Latency clears the budget**, on a laptop with a precomputed reference feature
+store and several hours of these runs already behind it. The 250 ms figure that
+matters is still the one measured on the target board.
+
+### The flight path is worth more than any other single knob
+
+An earlier configuration of the *same rig, same matcher, same tiles* gave
+2986 frames, 638 accepted (21%), median **7.02** m, max 14.82 m. It differed
+only in where and how the aircraft flew: a wide accidental orbit around a
+landing point 750 m south, over the industrial fringe. Fixing the flight path
+halved the median and took the worst fix from 14.82 m to 10.30 m, while
+*lowering* the acceptance rate — because the corrected orbit also crosses the
+commercial centre, which is the hard ground. See "where it flies" below.
 
 ## The closed loop actually closes
 
