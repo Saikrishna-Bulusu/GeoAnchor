@@ -59,12 +59,18 @@ PIDS=()
 #     cause. Match on the COMMAND LINE.
 #   * the layer processes are run.sh's grandchildren, so killing the PIDs this
 #     script collected leaves them running and holding their sockets.
+#   * agp_bridge runs under ROS via `bash -c ... exec python3`, so it does not
+#     answer to any name this script would think to look for. It was missing
+#     from this list and SEVEN of them accumulated across runs, each still
+#     subscribed and each still willing to publish to /fmu/in/aux_global_position
+#     -- so the next run's flight controller could have been fed by a previous
+#     run's pipeline. Nothing visible would have said so.
 #   * NEVER `pkill -f` a pattern that matches this script. It matches its own
 #     shell and kills the cleanup mid-way, which shows up as a bare exit 144.
 cleanup() {
   for p in "${PIDS[@]:-}"; do kill "$p" 2>/dev/null; done
   sleep 1
-  for p in $(ps -eo pid,args | grep -E "gz sim -r|geoanchor\.(data|processing|output)_layer|geoanchor\.api" | grep -v grep | awk "{print \$1}"); do
+  for p in $(ps -eo pid,args | grep -E "gz sim -r|geoanchor\.(data|processing|output)_layer|geoanchor\.api|scripts/agp_bridge\.py" | grep -v grep | awk "{print \$1}"); do
     kill -9 "$p" 2>/dev/null
   done
   for p in "${PIDS[@]:-}" $(pgrep -x px4) $(pgrep -x MicroXRCEAgent); do
@@ -90,7 +96,7 @@ done
 
 # ---------------------------------------------------------------- checks ----
 say "0/7  preconditions"
-STALE="$(ps -eo pid,args | grep -E "gz sim -r|geoanchor\.(data|processing|output)_layer" | grep -v grep | wc -l)"
+STALE="$(ps -eo pid,args | grep -E "gz sim -r|geoanchor\.(data|processing|output)_layer|scripts/agp_bridge\.py" | grep -v grep | wc -l)"
 if [ "$STALE" -gt 0 ] || pgrep -x px4 >/dev/null; then
   echo "  REFUSING: a previous run is still up ($STALE gz/layer processes)."
   echo "  Two Gazebo servers stepping one world starve PX4's IMU and the"
