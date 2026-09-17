@@ -1942,6 +1942,42 @@ So the estimator's single-scene tail dependence is **not fixable by adding
 scenes from AnyVisLoc**. Relax the envelope and report the domain shift, or
 use different data.
 
+### The rural cross-date win survives every alternative explanation
+
+All five areas' acquisition histories resolved (`results/
+wayback_source_meta.json`). Rural Griffith against the Sydney CBD:
+
+    native resolution    0.34-0.50 m    vs   0.30-0.50 m
+    stated accuracy      5.0 -10.2 m    vs   2.0 - 8.47 m
+    sensors              WV02/GE01/LG02 vs   WV02/WV03/GE01/Pleiades
+    cross-date           EVERY gap to 8.8 yr  vs  fails past ~3 yr
+
+**Rural matches across 8.8 years on imagery that is coarser and two to five
+times worse georeferenced**, with 118-443 inliers against the CBD's ~20. Not
+resolution, not georeferencing, not sensor family -- what is left is what is on
+the ground.
+
+**A throttled metadata query looks exactly like a short capture history.** Esri
+stops answering after a few hundred identify calls and the short acquisition
+list that comes back reads as complete. `wayback_source_meta.py` now flags
+coverage below 25% as `incomplete`; Perth came back at 15% with 2 acquisitions
+in one run and 6 in another. Check `coverage` before believing any of it.
+
+### Reference-keypoint count is a first-class variable and was uncontrolled
+
+`solve.py:152` calls `match()` ONCE against all candidate tiles' reference
+keypoints -- tiles partition RANSAC only. So Scene_09 hands the matcher 18432
+and Scene_10 hands it 2048, and `results/env80_sweep/` compares them without
+saying so. Tested both directions:
+
+    Scene_10 @2048 -> @18432    mnn 18.8% -> 22.4%   lg 35.9% -> 25.0%
+    Scene_09 @18432 -> @2052    mnn 46.3% -> 18.7%   lg 10.4% -> 14.2%
+
+**Opposite signs.** More reference keypoints help MNN and hurt LighterGlue --
+which also takes 6x the latency (284 -> 1794 ms) to do it worse. But equalising
+does NOT flip either winner, so it explains the disagreement's MAGNITUDE and
+not its SIGN. "xfeat_mnn wins" is still a claim about Scene_09.
+
 ## Open, in order
 
 1. **Get an altitude source onto the live-camera rig.** With intrinsics
