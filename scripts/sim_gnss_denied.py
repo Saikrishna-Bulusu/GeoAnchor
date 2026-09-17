@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import re
 import statistics
 import subprocess
 import sys
@@ -143,6 +144,61 @@ def own_instance(px4_dir: str, port: int) -> bool:
     return True
 
 
+class FixTap:
+    """Every fix the processing layer emits, scored against GAZEBO truth.
+
+    This is what turns "the estimator excursed" into "and here is what was fed
+    to it while it did". The pipeline's own `error_m` cannot answer it: under
+    GNSS denial that is computed against MAVLink, which is the estimate the fix
+    is itself driving, so a fix that drags the estimate 500 m looks like a fix
+    that agrees with the estimate perfectly.
+
+    Converts each fix's lat/lon to the same local ENU frame the truth is in.
+    Equirectangular about the world origin -- at a few hundred metres the
+    difference from a proper projection is millimetres, and the alternative is
+    a second geodetic path to get quietly wrong."""
+
+    def __init__(self, endpoint, lat0, lon0):
+        sys.path.insert(0, str(REPO))
+        from geoanchor import contracts as K
+        from geoanchor.bus import Subscriber
+        self.lat0, self.lon0 = lat0, lon0
+        self.m_per_deg_lat = 111_320.0
+        self.m_per_deg_lon = 111_320.0 * math.cos(math.radians(lat0))
+        self.sub = Subscriber([endpoint], [K.T_FIX])
+        self.rows = []
+        self._stop = False
+        self._t = threading.Thread(target=self._run, daemon=True)
+        self._t.start()
+
+    def _run(self):
+        while not self._stop:
+            try:
+                got = self.sub.recv(timeout_ms=200)
+            except Exception:
+                continue
+            if not got:
+                continue
+            _topic, header, _payload = got
+            self.rows.append((time.time(), header))
+
+    def stop(self):
+        self._stop = True
+
+    def to_local(self, lat, lon):
+        return ((lat - self.lat0) * self.m_per_deg_lat,
+                (lon - self.lon0) * self.m_per_deg_lon)
+
+
+def world_origin(world: str):
+    """The world's own spherical_coordinates -- the same origin PX4 is given."""
+    sdf = REPO / "sim" / "gz" / "worlds" / f"{world}.sdf"
+    txt = sdf.read_text()
+    lat = float(re.search(r"<latitude_deg>([-\d.]+)", txt).group(1))
+    lon = float(re.search(r"<longitude_deg>([-\d.]+)", txt).group(1))
+    return lat, lon
+
+
 def connect(endpoint):
     from pymavlink import mavutil
     m = mavutil.mavlink_connection(endpoint)
@@ -178,7 +234,7 @@ def sample(m, truth, seconds, label, rows):
         tn, tee = te
         err = math.hypot(msg.x - tn, msg.y - tee)
         t = time.time() - t0
-        rows.append((label, t, err, msg.x, msg.y, tn, tee))
+        rows.append((label, t, err, msg.x, msg.y, tn, tee, time.time()))
         if t - last_print >= 5.0:
             last_print = t
             print(f"  {label:9s} t={t:5.1f}s  drift {err:7.2f} m", flush=True)
@@ -208,6 +264,8 @@ def main() -> int:
                     help="seconds with GNSS still on, to prove the tap agrees")
     ap.add_argument("--seconds", type=float, default=180.0,
                     help="seconds to hold GNSS denied")
+    ap.add_argument("--fix-endpoint", default="ipc:///tmp/geoanchor/processing.sock",
+                    help="where the processing layer publishes fixes")
     ap.add_argument("--no-vision", action="store_true",
                     help="THE CONTROL. Stop the AGP bridge first, so the "
                          "estimator has nothing but inertial dead reckoning.")
@@ -241,6 +299,14 @@ def main() -> int:
         print(f"CONTROL RUN: stopped {len(pids)} agp_bridge process(es); "
               "the estimator now has no vision aiding")
         time.sleep(2)
+
+    lat0, lon0 = world_origin(a.world)
+    tap = None
+    try:
+        tap = FixTap(a.fix_endpoint, lat0, lon0)
+        print(f"fix stream from {a.fix_endpoint}, origin {lat0:.7f} {lon0:.7f}")
+    except Exception as exc:
+        print(f"no fix stream ({exc}) -- estimator drift only, no correlation")
 
     rows = []
     print(f"\nbaseline, GNSS ON, {a.baseline:.0f}s "
@@ -318,11 +384,37 @@ def main() -> int:
                               f"_{int(a.seconds)}s.csv")
     out.parent.mkdir(exist_ok=True)
     with out.open("w") as fh:
-        fh.write("phase,t_s,error_m,est_n,est_e,truth_n,truth_e\n")
+        # t_unix, because without an absolute clock these samples cannot be
+        # put beside the fix stream, and that correlation is the whole point.
+        fh.write("phase,t_s,t_unix,error_m,est_n,est_e,truth_n,truth_e\n")
         for r in rows:
-            fh.write(f"{r[0]},{r[1]:.3f},{r[2]:.4f},{r[3]:.3f},{r[4]:.3f},"
-                     f"{r[5]:.3f},{r[6]:.3f}\n")
+            fh.write(f"{r[0]},{r[1]:.3f},{r[7]:.3f},{r[2]:.4f},{r[3]:.3f},"
+                     f"{r[4]:.3f},{r[5]:.3f},{r[6]:.3f}\n")
     print(f"\nwrote {out.relative_to(REPO)}")
+
+    if tap is not None:
+        tap.stop()
+        fout = out.with_name(out.name.replace("sim_gnss_denied_", "sim_gnss_fixes_"))
+        n_acc = 0
+        with fout.open("w") as fh:
+            fh.write("t_unix,accepted,inliers,matches,sigma_m,reproj_err_px,"
+                     "fix_n,fix_e,truth_n,truth_e,fix_error_m\n")
+            for t_rx, h in tap.rows:
+                if h.get("lat") is None:
+                    continue
+                fn, fe = tap.to_local(h["lat"], h["lon"])
+                # Truth at the nearest estimator sample, which shares this clock.
+                near = min(rows, key=lambda r: abs(r[7] - t_rx)) if rows else None
+                tn, te = (near[5], near[6]) if near else (float("nan"),) * 2
+                err = math.hypot(fn - tn, fe - te)
+                n_acc += 1 if h.get("accepted") else 0
+                fh.write(f"{t_rx:.3f},{int(bool(h.get('accepted')))},"
+                         f"{h.get('inliers', 0)},{h.get('matches', 0)},"
+                         f"{h.get('sigma_m') if h.get('sigma_m') is not None else ''},"
+                         f"{h.get('reproj_err_px') if h.get('reproj_err_px') is not None else ''},"
+                         f"{fn:.3f},{fe:.3f},{tn:.3f},{te:.3f},{err:.3f}\n")
+        print(f"wrote {fout.relative_to(REPO)}  "
+              f"({len(tap.rows)} fixes seen, {n_acc} accepted)")
     return 0
 
 

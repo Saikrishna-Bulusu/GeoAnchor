@@ -112,10 +112,22 @@ the control's own 120 m/min, which over 13.8 s is 28 m, not 542. Reaching
 542 m requires the estimate to be *pulled* — a wrong fix passing the inlier
 gate and being fused with an 8 m sigma that says it is trustworthy.
 
-That is the sharpest evidence yet for the rejection half of the finding below,
-and it is **not proven**. It needs the excursion windows correlated against the
-accepted-fix stream. Note the pipeline's own `error_m` is useless for that
-while GNSS is denied, for the same circularity reason as above.
+That was the hypothesis, and **measuring it refuted it**
+([`results/excursions_are_starvation_2026-09-18.md`](results/excursions_are_starvation_2026-09-18.md)).
+Across 300 s of denial with the fix stream tapped and scored against Gazebo
+truth: **953 accepted fixes, median 3.4 m, worst 24.0 m.** No bad fix ever
+reached the estimator. What collapses is the number of fixes the pipeline
+*emits* — 15 in 60 s where a healthy window emits 172 in 30 — while the
+acceptance ratio holds at 87–100%. Ten gaps exceeded AGP's 5 s timeout, and the
+largest drove the error at **+117.3 m/min against the control's measured
++119.91 m/min**: the estimator is coasting, not being pulled.
+
+**That strengthens the rejection finding and moves the binding constraint.**
+The gate and the plausibility check ahead of it kept every bad fix out across
+five minutes with no GNSS. Under denial the question is not how good a fix is
+but **how long since the last one**, measured against AGP's 5 s timeout and
+ArduPilot's 7 s `posTimeout`. A pipeline emitting a perfect fix every 20 s is
+useless here; one emitting an 8 m fix every second is fine.
 
 ---
 

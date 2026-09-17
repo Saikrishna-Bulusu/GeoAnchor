@@ -60,21 +60,34 @@ Outside its one excursion the vision-aided estimator never exceeds 41 m in
 three minutes, so the p90 of 25 m is carrying the excursion's shoulders rather
 than describing normal behaviour.
 
-**And the excursions cannot be gaps in aiding.** If the fix simply stopped
-arriving, the estimator would dead-reckon at the rate the control measured,
-about 120 m/min — which over 13.8 s is 28 m, not 542. Reaching 542 m requires
-the estimate to be *pulled*, not to drift. The likely mechanism is a wrong fix
-passing the inlier gate and being fused with an 8 m sigma that says it is
-trustworthy, and that is precisely the failure `CLAUDE.md`'s central finding is
-about: rejection is the hard problem, and a covariance that cannot express "I
-do not believe this" hands the filter a confident lie.
+**REFUTED THE SAME DAY.** The paragraph that stood here argued the excursions
+could not be gaps in aiding — that 542 m in 13.8 s is impossible by dead
+reckoning at the control's 120 m/min (which gives 28 m), so the estimate must
+have been *pulled* by a wrong fix passing the inlier gate. It called that the
+strongest argument yet for the rejection half of the finding, and flagged it
+unproven.
 
-**This is the strongest argument yet for the rejection half of the finding, and
-it is not yet proven.** Confirming it means correlating the excursion windows
-against the accepted-fix stream — inliers, sigma, and the gate decision at those
-timestamps. Note the pipeline's own `error_m` is useless for this while GNSS is
-denied, for the same circularity reason the rest of this document is built
-around: its `actual_gps` is the estimate the fix is driving.
+It was measured, and it is wrong. See
+[`excursions_are_starvation_2026-09-18.md`](excursions_are_starvation_2026-09-18.md).
+Across 300 s of denial with the fix stream tapped and scored against Gazebo
+truth: **953 accepted fixes, median error 3.4 m, worst 24.0 m.** No bad fix
+ever reached the estimator. What collapses is the number of fixes the pipeline
+*emits* — 15 in 60 s where a healthy window emits 172 in 30 — while the
+acceptance ratio stays at 87–100%. Ten gaps exceeded AGP's 5 s timeout and the
+largest drove the error at **+117.3 m/min against the control's measured
++119.91 m/min**. The estimator is coasting, at exactly the rate coasting
+produces.
+
+The bad reasoning is worth keeping: the premise was right and the conclusion
+did not follow, because it assumed the only alternatives were "coasting" and
+"poisoned". A gap can simply be far longer than the excursion window measured
+at a 5x-median threshold — the 53.6 s gap here produced a 43.8 s window.
+
+This **strengthens** the rejection finding rather than undermining it: the gate
+and the plausibility check ahead of it kept every bad fix out across five
+minutes with no GNSS. And it moves the binding constraint from correctness to
+**availability** — under denial the question is not how good a fix is but how
+long since the last one.
 
 ## With GNSS available, the fix makes the estimate slightly worse
 
