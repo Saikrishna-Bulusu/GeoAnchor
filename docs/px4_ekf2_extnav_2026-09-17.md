@@ -38,15 +38,18 @@ The 4–20 Hz band was then repeated twice more, because one sample per rate
 cannot tell a floor from a flake — and the first pass contained exactly such a
 flake:
 
-| inject rate | interval | pass 1 | pass 2 | pass 3 | fused |
-|---|---|---|---|---|---|
-| 2 Hz | 500 ms | 0.00 m | — | — | no |
-| 3 Hz | 333 ms | −0.01 m | — | — | no |
-| 4 Hz | 250 ms | 0.00 m | 0.00 m | −0.01 m | **no** |
-| **5 Hz** | **200 ms** | 19.74 m | 19.96 m | 19.50 m | **yes** |
-| **6 Hz** | **166 ms** | 20.47 m | 19.92 m | 20.27 m | **yes** |
-| **10 Hz** | **100 ms** | *−0.01 m* | 20.28 m | 19.92 m | **yes** |
-| **20 Hz** | **50 ms** | 19.90 m | 19.92 m | 20.26 m | **yes** |
+| inject rate | interval | pass 1 | pass 2 | pass 3 | pass 4 | fused |
+|---|---|---|---|---|---|---|
+| 2 Hz | 500 ms | 0.00 m | — | — | — | no |
+| 3 Hz | 333 ms | −0.01 m | — | — | — | no |
+| 4 Hz | 250 ms | 0.00 m | 0.00 m | −0.01 m | 0.00 m | **no, 4/4** |
+| **5 Hz** | **200 ms** | 19.74 | 19.96 | 19.50 | 20.28 | **yes, 4/4** |
+| **6 Hz** | **166 ms** | 20.47 | 19.92 | 20.27 | 19.97 | **yes, 4/4** |
+| **10 Hz** | **100 ms** | *−0.01* | 20.28 | 19.92 | 19.53 | **yes, 3/4** |
+| **20 Hz** | **50 ms** | 19.90 | 19.92 | 20.26 | 19.92 | **yes, 4/4** |
+
+Four passes of 4 Hz all fail. Twelve of twelve arms at or above 5 Hz fuse, the
+single exception being pass 1's 10 Hz.
 
 **Pass 1's 10 Hz failure did not reproduce and was noise.** It is left in the
 table rather than deleted, because a single anomalous cell is exactly what
