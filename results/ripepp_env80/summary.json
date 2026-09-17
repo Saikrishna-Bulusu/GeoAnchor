@@ -180,7 +180,11 @@
           "within_10m": null,
           "within_20m": null
         }
-      }
+      },
+      "tiles_searched": 9,
+      "ref_keypoints_per_tile": 2048,
+      "ref_keypoints_total": 18432,
+      "geometry_backfilled": true
     }
   }
 }

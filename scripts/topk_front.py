@@ -118,22 +118,22 @@ def main() -> int:
                 continue
             rows.append((s.get("p95_latency_ms", float("nan")),
                          g.get("accept_rate", 0.0), method, k, gate, g,
-                         s.get("median_latency_ms")))
+                         s.get("ref_keypoints_total")))
         if not rows:
             continue
         on = {id(p) for p in front(rows)}
 
         print(f"\n\033[1m{scene}\033[0m   gate = lowest with p99 <= {a.p99_max:g} m, "
               f"budget {a.budget:g} ms")
-        print(f"  {'method':16} {'k':>5} {'gate':>5} {'lat p95':>9} {'accept':>7} "
-              f"{'med_m':>7} {'p90_m':>7} {'p99_m':>7} {'max_m':>7}  front  budget")
+        print(f"  {'method':16} {'k':>5} {'gate':>5} {'ref kp':>8} {'lat p95':>9} "
+              f"{'accept':>7} {'med_m':>7} {'p90_m':>7} {'p99_m':>7} {'max_m':>7}  front  budget")
         for r in sorted(rows, key=lambda r: (r[2], r[3])):
-            lat, acc, method, k, gate, g, _med = r
+            lat, acc, method, k, gate, g, refkp = r
             mark = "  *  " if id(r) in on else "     "
             fits = "fits" if lat <= a.budget else f"+{lat - a.budget:.0f}"
             gs = str(gate) if gate is not None else "none"
-            print(f"  {method:16} {k:5d} {gs:>5} {lat:9.1f} {acc:7.1%} "
-                  f"{g.get('median_m', 0):7.2f} {g.get('p90_m', 0):7.2f} "
+            print(f"  {method:16} {k:5d} {gs:>5} {str(refkp or '--'):>8} {lat:9.1f} "
+                  f"{acc:7.1%} {g.get('median_m', 0):7.2f} {g.get('p90_m', 0):7.2f} "
                   f"{g.get('p99_m', 0):7.2f} {g.get('max_m', 0):7.2f} {mark} {fits:>7}")
 
         f = front(rows)
@@ -169,6 +169,15 @@ def main() -> int:
     print("\nLatency is the Legion's. The ORDERING transfers across boards; the "
           "values do not.\nRe-run env80_sweep.py on the target board before "
           "trusting the budget column.")
+    # The sweep that produced these moved BOTH knobs together.
+    print("\n\033[1mtop_k here is not top_k alone.\033[0m scripts/topk_pareto.sh passes "
+          "--frame-keypoints K\nAND --ref-keypoints K, so every step of k also scaled the "
+          "reference total (the\n`ref kp` column). These rows measure frame and reference "
+          "keypoints TOGETHER.\nSeparating them needs a sweep that holds one fixed.")
+    print("\n`ref kp` is the TOTAL reference keypoints one match() call saw "
+          "(tiles x per-tile).\nIt moves xfeat_mnn and xfeat_lg in OPPOSITE "
+          "directions by 2-3x, so two rows with\ndifferent ref kp are not the "
+          "same experiment -- compare within a scene, or match it.")
 
     if a.out:
         Path(a.out).write_text(json.dumps(

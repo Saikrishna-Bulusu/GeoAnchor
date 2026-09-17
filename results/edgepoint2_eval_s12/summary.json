@@ -180,7 +180,11 @@
           "within_10m": null,
           "within_20m": null
         }
-      }
+      },
+      "tiles_searched": 9.0,
+      "ref_keypoints_per_tile": 2048,
+      "ref_keypoints_total": 18432,
+      "geometry_backfilled": true
     },
     "Scene_09__satellite__edgepoint2_t32": {
       "n_frames": 134,
@@ -334,7 +338,11 @@
           "within_10m": null,
           "within_20m": null
         }
-      }
+      },
+      "tiles_searched": 9.0,
+      "ref_keypoints_per_tile": 2048,
+      "ref_keypoints_total": 18432,
+      "geometry_backfilled": true
     },
     "Scene_09__satellite__edgepoint2_s32": {
       "n_frames": 134,
@@ -488,7 +496,11 @@
           "within_10m": null,
           "within_20m": null
         }
-      }
+      },
+      "tiles_searched": 9.0,
+      "ref_keypoints_per_tile": 2048,
+      "ref_keypoints_total": 18432,
+      "geometry_backfilled": true
     },
     "Scene_09__satellite__edgepoint2_s64": {
       "n_frames": 134,
@@ -642,7 +654,11 @@
           "within_10m": null,
           "within_20m": null
         }
-      }
+      },
+      "tiles_searched": 9.0,
+      "ref_keypoints_per_tile": 2048,
+      "ref_keypoints_total": 18432,
+      "geometry_backfilled": true
     },
     "Scene_10__satellite__xfeat_mnn": {
       "n_frames": 192,
@@ -796,7 +812,11 @@
           "within_10m": 1.0,
           "within_20m": 1.0
         }
-      }
+      },
+      "tiles_searched": 1.0,
+      "ref_keypoints_per_tile": 2048,
+      "ref_keypoints_total": 2048,
+      "geometry_backfilled": true
     },
     "Scene_10__satellite__edgepoint2_t32": {
       "n_frames": 192,
@@ -950,7 +970,11 @@
           "within_10m": null,
           "within_20m": null
         }
-      }
+      },
+      "tiles_searched": 1.0,
+      "ref_keypoints_per_tile": 2048,
+      "ref_keypoints_total": 2048,
+      "geometry_backfilled": true
     },
     "Scene_10__satellite__edgepoint2_s32": {
       "n_frames": 192,
@@ -1104,7 +1128,11 @@
           "within_10m": null,
           "within_20m": null
         }
-      }
+      },
+      "tiles_searched": 1.0,
+      "ref_keypoints_per_tile": 2048,
+      "ref_keypoints_total": 2048,
+      "geometry_backfilled": true
     },
     "Scene_10__satellite__edgepoint2_s64": {
       "n_frames": 192,
@@ -1258,7 +1286,11 @@
           "within_10m": null,
           "within_20m": null
         }
-      }
+      },
+      "tiles_searched": 1.0,
+      "ref_keypoints_per_tile": 2048,
+      "ref_keypoints_total": 2048,
+      "geometry_backfilled": true
     }
   }
 }

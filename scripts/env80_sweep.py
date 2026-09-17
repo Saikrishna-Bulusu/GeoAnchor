@@ -165,10 +165,26 @@ def run_one(scene_dir, frames_dir, mode, method_name, cfg, out_csv, args) -> lis
     return rows
 
 
-def summarise(rows: list) -> dict:
+def summarise(rows: list, ref_kp_per_tile: int = None) -> dict:
+    """Numbers for one (scene, mode, method), plus the REFERENCE GEOMETRY.
+
+    The geometry is here because leaving it out cost a wrong conclusion.
+    `method.match()` is called once against the concatenated reference
+    keypoints of every candidate tile (solve.py:152) -- tiles partition the
+    RANSAC input, never the matching -- so a 9-tile scene hands the matcher
+    18432 reference keypoints where a 1-tile scene hands it 2048. Measured,
+    that difference moves xfeat_mnn and xfeat_lg in OPPOSITE directions by
+    2-3x. Comparing two scenes without it is comparing two different problems,
+    and results/env80_sweep/ did exactly that for Scene_09 against Scene_10.
+    """
     n = len(rows)
     solved = [r for r in rows if r["plausible"] and r["error_m"] is not None]
+    tiles = pct([r["tiles_searched"] for r in rows], 0.5) if rows else None
     out = {"n_frames": n, "n_plausible": len(solved),
+           "tiles_searched": tiles,
+           "ref_keypoints_per_tile": ref_kp_per_tile,
+           "ref_keypoints_total": (int(tiles * ref_kp_per_tile)
+                                   if tiles and ref_kp_per_tile else None),
            "plausible_rate": round(len(solved) / n, 4) if n else None,
            "median_latency_ms": pct([r["latency_ms"] for r in rows], 0.5),
            "p95_latency_ms": pct([r["latency_ms"] for r in rows], 0.95),
@@ -256,7 +272,31 @@ def main() -> int:
         out_csv = out_root / f"{tag}.csv"
         print(f"[{tag}]")
         if out_csv.exists() and not force:
-            rows = list(csv.DictReader(open(out_csv)))
+            # The cache key is scene__mode__method and carries NO geometry, so
+            # re-running one --out directory with a different --ref-keypoints
+            # would silently reuse rows produced under the old value and then
+            # label them with the new args. Compare against what this
+            # directory's own summary.json recorded and refuse rather than
+            # publish a mislabelled number.
+            prev = out_root / "summary.json"
+            if prev.exists():
+                try:
+                    pa = json.loads(prev.read_text()).get("args", {})
+                except Exception:
+                    pa = {}
+                for k in ("ref_keypoints", "frame_keypoints", "tile_px", "overlap_px"):
+                    if k in pa and pa[k] != getattr(args, k, pa[k]):
+                        print(f"    CACHED ROWS WERE MADE WITH {k}={pa[k]}, "
+                              f"you asked for {getattr(args, k)}.")
+                        print(f"    Use a different --out, or FORCE=1 to redo. Skipping.")
+                        rows = []
+                        break
+                else:
+                    rows = list(csv.DictReader(open(out_csv)))
+            else:
+                rows = list(csv.DictReader(open(out_csv)))
+            if not rows:
+                continue
             for r in rows:
                 for k in ("inliers", "matches", "keypoints", "tiles_searched"):
                     r[k] = int(r[k] or 0)
@@ -272,8 +312,11 @@ def main() -> int:
                 continue
             rows = run_one(sd, fd if fd.is_dir() else sd, mode, method, cfg, out_csv, args)
         if rows:
-            summaries[tag] = summarise(rows)
-            print(f"    -> {out_csv.relative_to(REPO)}")
+            summaries[tag] = summarise(rows, args.ref_keypoints)
+            g = summaries[tag]
+            print(f"    -> {out_csv.relative_to(REPO)}   reference: "
+                  f"{g['tiles_searched']:g} tiles x {g['ref_keypoints_per_tile']} = "
+                  f"{g['ref_keypoints_total']} keypoints")
 
     (out_root / "summary.json").write_text(json.dumps(
         {"args": vars(args), "generated": time.time(), "summaries": summaries}, indent=2))

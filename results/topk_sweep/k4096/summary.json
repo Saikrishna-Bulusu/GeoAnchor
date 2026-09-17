@@ -179,7 +179,11 @@
           "within_10m": null,
           "within_20m": null
         }
-      }
+      },
+      "tiles_searched": 9.0,
+      "ref_keypoints_per_tile": 4096,
+      "ref_keypoints_total": 36864,
+      "geometry_backfilled": true
     },
     "Scene_10__satellite__xfeat_mnn": {
       "n_frames": 192,
@@ -333,7 +337,11 @@
           "within_10m": 1.0,
           "within_20m": 1.0
         }
-      }
+      },
+      "tiles_searched": 1.0,
+      "ref_keypoints_per_tile": 4096,
+      "ref_keypoints_total": 4096,
+      "geometry_backfilled": true
     }
   }
 }

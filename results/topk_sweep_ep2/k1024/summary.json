@@ -180,7 +180,11 @@
           "within_10m": null,
           "within_20m": null
         }
-      }
+      },
+      "tiles_searched": 9.0,
+      "ref_keypoints_per_tile": 1024,
+      "ref_keypoints_total": 9216,
+      "geometry_backfilled": true
     },
     "Scene_10__satellite__edgepoint2_s64": {
       "n_frames": 192,
@@ -334,7 +338,11 @@
           "within_10m": null,
           "within_20m": null
         }
-      }
+      },
+      "tiles_searched": 1.0,
+      "ref_keypoints_per_tile": 1024,
+      "ref_keypoints_total": 1024,
+      "geometry_backfilled": true
     }
   }
 }
