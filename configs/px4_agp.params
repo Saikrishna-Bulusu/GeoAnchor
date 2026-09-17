@@ -1,0 +1,27 @@
+# PX4 v1.16.2 Aux Global Position parameters for GeoAnchor.
+#
+# This is the OTHER PX4 path -- see docs/px4_ekf2_extnav_2026-09-17.md. Unlike
+# the external-vision path it has NO RATE FLOOR: its starting condition is
+# finite lat/lon plus yaw alignment, and the only timing rule is a 5 s timeout,
+# against EV's 200 ms start gate. Measured fusing at 2 Hz with GNSS denied.
+#
+# Reachable only over uXRCE-DDS; there is no MAVLink message for it. Publish
+# with scripts/agp_bridge.py.
+#
+# name             value   why
+EKF2_AGP_CTRL          1   # bitmask, bit 0 = horizontal position ONLY. Bit 1
+                           # (vertical) stays clear: this pipeline does not
+                           # produce an altitude, and the flight controller
+                           # keeps estimating height from baro.
+                           # DEFAULTS TO 0 -- AGP is OFF until this is set.
+EKF2_AGP_NOISE       0.1   # LOWER BOUND on the eph we supply, metres. The
+                           # default is 0.9, which would silently floor every
+                           # sigma tighter than 90 cm -- and the whole point of
+                           # the covariance estimator is that a good fix gets a
+                           # small number. Set below the tightest sigma the
+                           # estimator is expected to emit.
+EKF2_AGP_GATE        3.0   # innovation gate, standard deviations. Note this is
+                           # 3.0 where the EV path's EKF2_EVP_GATE is 5.0, so
+                           # AGP is the TIGHTER of the two by default.
+EKF2_AGP_DELAY      50.0   # ms. REBOOT REQUIRED. Placeholder -- replace with
+                           # YOUR measured capture-to-publish median.
