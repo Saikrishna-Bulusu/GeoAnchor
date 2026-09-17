@@ -53,7 +53,17 @@ _JETPACK_BY_L4T_MAJOR = {
 
 
 def detect() -> Board:
-    model = _read("/proc/device-tree/model") or _read("/sys/firmware/devicetree/base/model")
+    # device-tree first: that is where every board this project targets -- Pi,
+    # Xavier, Orin -- states what it is. x86 machines have no device tree, so
+    # `model` came back "unknown" on the laptop, which is what board.json has
+    # been recording for it and what forced log_layout to map an ARCHITECTURE
+    # to a machine name. DMI is x86's equivalent and product_version carries
+    # the friendly string ("Legion Pro 5 16IRX10") where product_name is a
+    # sales code ("83NN").
+    model = (_read("/proc/device-tree/model")
+             or _read("/sys/firmware/devicetree/base/model")
+             or _read("/sys/devices/virtual/dmi/id/product_version")
+             or _read("/sys/devices/virtual/dmi/id/product_name"))
     arch = os.uname().machine
     cores = os.cpu_count() or 1
     try:

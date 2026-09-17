@@ -159,9 +159,20 @@ for d in "$REPO"/runs/*/; do
 
   # Skip a run already pushed and unchanged, so a sync after a quiet hour is
   # a no-op rather than a rewrite of every file.
-  if [ -f "$dest/session.json" ] && \
-     [ "$d/session.json" -ot "$dest/session.json" ]; then
-    continue
+  #
+  # A run is identified by its NAME, wherever it currently sits, not by the
+  # path this script would choose for it today. Those differ whenever the
+  # classification improves: session.json records what the board knew about
+  # itself AT THE TIME, so a laptop whose model used to read "unknown" and now
+  # reads "Legion Pro 5 16IRX10" would otherwise have every historical run
+  # re-copied under a second directory and the tree would fork on a label
+  # change. /api/fleet already resolves by name for the same reason.
+  existing="$(find board -maxdepth 4 -type d -name "$name" 2>/dev/null | head -1)"
+  if [ -n "$existing" ]; then
+    if [ -f "$existing/session.json" ] && [ "$d/session.json" -ot "$existing/session.json" ]; then
+      continue
+    fi
+    dest="$existing"       # update it where it already lives
   fi
 
   # Size guard, measured over exactly the files that would be copied.

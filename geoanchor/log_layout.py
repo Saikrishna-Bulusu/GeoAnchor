@@ -32,6 +32,7 @@ from pathlib import Path
 # Pi 4 Model B Rev 1.5", "NVIDIA Jetson AGX Xavier" -- so this survives a
 # hostname change, which is exactly what the old layout did not.
 _MODEL_SLUGS = (
+    ("legion", "legion"),
     ("raspberry pi 5", "pi5"),
     ("raspberry pi 4", "pi4"),
     ("raspberry pi 3", "pi3"),
@@ -58,14 +59,14 @@ def board_slug(board: dict) -> str:
             return slug
     if board.get("jetpack") or board.get("l4t"):
         return "jetson-unknown"
+    # No model, or one nothing above matched: fall back to the architecture
+    # rather than to a machine name. Mapping an ARCHITECTURE to a name was what
+    # this did before -- x86_64 meant "legion" -- and it silently filed a
+    # second x86 machine's runs under the laptop's directory, on exactly the
+    # axis this tree exists to separate. device.detect() now reads DMI on x86,
+    # so a real model string is available there too and the table above hits.
     arch = str(board.get("arch") or "").lower()
-    if arch in ("x86_64", "amd64"):
-        # The only x86 machine in this project is the development laptop, and
-        # its `model` reads "unknown" because there is no /proc entry for it.
-        return "legion"
-    if arch:
-        return f"unknown-{arch}"
-    return "unknown-board"
+    return f"unknown-{arch}" if arch else "unknown-board"
 
 
 def method_slug(header: dict) -> str:
@@ -79,12 +80,6 @@ def classify(session_json: Path) -> tuple[str, str]:
     """(board, method) for one session.json. Raises on an unreadable file."""
     header = json.loads(Path(session_json).read_text()).get("header") or {}
     return board_slug(header.get("board")), method_slug(header)
-
-
-def dest_parts(session_json: Path, run_name: str) -> tuple[str, ...]:
-    """Path components, relative to the logs repo root, for one run."""
-    board, method = classify(session_json)
-    return ("board", board, method, run_name)
 
 
 def iter_runs(root: Path):
@@ -135,7 +130,7 @@ if __name__ == "__main__":
     elif args and args[0] == "--dest":
         # --dest <session.json> <run-name>  ->  the path, relative to the logs
         # repo root, that this run belongs at. Used by sync_logs.sh.
-        print("/".join(dest_parts(Path(args[1]), args[2])))
+        print("/".join(("board",) + classify(Path(args[1])) + (args[2],)))
     else:
         target = Path(args[0] if args else ".")
         n = 0
