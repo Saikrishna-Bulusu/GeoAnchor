@@ -108,6 +108,36 @@ view of a flat textured plane has no relief displacement, no cloud, no seasonal
 change and no exposure difference, which is why this run contains no
 catastrophic fixes and real satellite runs do.
 
+## Taking GNSS away
+
+`results/sim_gnss_denied_2026-09-18.md` — the measurement this rig was built
+for. Everything else here shows fixes being *fused* alongside a healthy GPS,
+which an estimator would survive whether or not the fix contributed anything.
+
+```bash
+.venv/bin/python scripts/sim_gnss_denied.py              # vision aiding on
+.venv/bin/python scripts/sim_gnss_denied.py --no-vision  # the control
+```
+
+| | GNSS denied, 180 s | drift growth |
+|---|---|---|
+| vision aiding ON | median 7.78 m, p90 25.25 | +1.40 m/min, bounded |
+| vision aiding OFF | median 204.14 m, p90 367.68 | +119.91 m/min, still climbing |
+
+**`--no-vision` is not optional.** A fixed wing with a good IMU dead-reckons
+tolerably for a while, so "the estimate held for three minutes" is not evidence
+the fix did anything until the same aircraft, same flight, same denial has been
+shown to lose it.
+
+**Truth comes from Gazebo, never from MAVLink.** With GNSS denied,
+`GLOBAL_POSITION_INT` *is* the estimate, and the estimate is being driven by the
+fixes under test — scoring against it asks the fix how well it agrees with
+itself. The script subscribes to `/world/<world>/dynamic_pose/info` and compares
+in local metres (Gazebo ENU north=y east=x, PX4 NED north=x east=y).
+
+The script **starts its own MAVLink instance**, because by the time a rig has
+been flying a while every existing one is locked to a peer that has exited.
+
 ## Is it actually matching? A check that isolates the renderer
 
 The rig has three things that can each look like "the matcher is broken": the
@@ -421,6 +451,8 @@ something you can see rather than something you have to read about.
 | the aircraft drifts off the map centre | a landing item has to sit `alt/tan(FW_LND_ANG)` ≈ 740 m away, and PX4 flies to it — through an unlimited loiter with `autocontinue: 0` and through a commanded `AUTO.LOITER`. The rig sets `MIS_TKO_LAND_REQ 0` so the mission needs no landing item at all. |
 | `vehicle_status.nav_state` is 5, not 4 | that is `AUTO_RTL`, a datalink-loss failsafe firing 10 s after `sim_fly.py` exits and stops heartbeating. Over this world home *is* the map centre, so it looks correct. `NAV_DLL_ACT 0` in the sim params turns it off. |
 | `no heartbeat` from `px4_set_params.py` | a second invocation against a port PX4 has already locked to the first. Pass every file to one invocation: `--file a.params b.params`. |
+| `no heartbeat` from any tool, while `px4-listener` still works | PX4 binds each UDP MAVLink instance to its first peer and **never releases it**, so once the pipeline, `px4_set_params.py` and `sim_fly.py` have claimed theirs, a tool attached later gets nothing from a perfectly healthy autopilot. Start your own: `px4-mavlink start -x -u 14590 -o 14591 -r 200000 -m onboard`, and be its first client — a test connection burns it. |
+| `Maximum MAVLink instance count of 6 reached` | every probe burns one. `px4-mavlink status` lists them with their partner addresses; `px4-mavlink stop -u <port>` recycles one whose partner no longer exists. |
 | a previous run seems to still be feeding the flight controller | orphaned `agp_bridge.py` processes. They run under ROS via `bash -c ... exec python3`, answer to no obvious name, and seven accumulated before `--kill` learned to match them — each still subscribed and still willing to publish to `/fmu/in/aux_global_position`. `ps -eo args \| grep [a]gp_bridge` to check. |
 | `cs_aux_gpos` stays False with everything else healthy | the AGP bridge is not running. It needs **both** ROS (`rclpy`, `px4_msgs`) and the venv (`zmq`, `geoanchor`); `.venv/bin/python` fails on `rclpy` and bare `python3` on `zmq`. Read `/tmp/agp_bridge.log`. |
 | `ModuleNotFoundError: gz` | `sudo apt install python3-gz-transport13 python3-gz-msgs10`. Do not set `PYTHONPATH` — see above. |

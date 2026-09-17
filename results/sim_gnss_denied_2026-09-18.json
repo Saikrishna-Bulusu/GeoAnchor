@@ -1,0 +1,55 @@
+{
+  "vision": {
+    "baseline": {
+      "n": 301,
+      "median": 1.39,
+      "p90": 1.63,
+      "max": 1.8
+    },
+    "denied": {
+      "n": 1805,
+      "median": 7.78,
+      "p90": 25.25,
+      "max": 542.33
+    },
+    "excursions": {
+      "n_samples": 139,
+      "window_s": [
+        145.5,
+        159.3
+      ],
+      "pct_of_run": 7.7
+    },
+    "denied_ex_excursion": {
+      "n": 1657,
+      "median": 7.2,
+      "p90": 22.05,
+      "max": 27.17
+    }
+  },
+  "control": {
+    "baseline": {
+      "n": 300,
+      "median": 0.7,
+      "p90": 1.23,
+      "max": 29.77
+    },
+    "denied": {
+      "n": 1789,
+      "median": 204.14,
+      "p90": 367.68,
+      "max": 395.87
+    },
+    "excursions": {
+      "n_samples": 0,
+      "window_s": null,
+      "pct_of_run": 0.0
+    },
+    "denied_ex_excursion": {
+      "n": 1789,
+      "median": 204.14,
+      "p90": 367.68,
+      "max": 395.87
+    }
+  }
+}
