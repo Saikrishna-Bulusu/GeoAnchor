@@ -96,6 +96,18 @@ DISPLAY = {
     "edgepoint2_s32": ("EdgePoint2 Small (32-D)",
                        "Narrow descriptor buys no speed here and costs accuracy. "
                        "Measured for the comparison, not recommended."),
+    "ripepp": ("RIPE++ (MegaDepth)",
+               "Learns from positive pairs only, no correspondence labels, and "
+               "ships its own trainable matcher -- the one path to a fine-tuned "
+               "descriptor that does not break its matcher. ACADEMIC LICENCE: "
+               "measurable, never shippable."),
+    "ripepp_tokyo": ("RIPE++ (MegaDepth + Tokyo 24/7)",
+                     "The only published checkpoint trained for appearance "
+                     "change over time, which is the nearest analogue to the "
+                     "cross-date problem. Same academic licence."),
+    "ripepp_scared": ("RIPE++ (SCARED)",
+                      "Endoscopy checkpoint. Included for completeness; there "
+                      "is no reason to expect it to transfer to aerial."),
     "edgepoint2_s64": ("EdgePoint2 Small (64-D)",
                        "Faster than XFeat on both scenes and its worst error is "
                        "8.4 m where XFeat's is 187 m. Wants a LOWER inlier gate "
@@ -518,6 +530,202 @@ class EdgePoint2Method(Method):
 
 
 # --------------------------------------------------------------------------
+# RIPE++. LIMIT@ECCV 2026, arXiv 2608.19693, Fraunhofer HHI.
+#
+# LICENCE FIRST, because it is the one thing that constrains where this can go.
+# RIPE++ is **NOT** open source: it ships under Fraunhofer's "Software Copyright
+# License for Academic Use", which permits "non-commercial purposes of
+# evaluation, testing and academic research" and prohibits commercial use or
+# exploitation of the code or any modification of it. German law, Munich
+# jurisdiction. Every other matcher here is permissive -- XFeat Apache 2.0,
+# EdgePoint2 MIT, SIFT/ORB/AKAZE in OpenCV -- so this is the first one that can
+# be MEASURED and reported but can never ship in anything flown commercially or
+# released. Treat it as a benchmark reference point, not a candidate.
+#
+# THE REASON IT IS INTERESTING is not that it is a ninth row. It learns from
+# POSITIVE IMAGE PAIRS ONLY, with no correspondence labels, and it ships a
+# trainable matcher of its own. That second half is what makes a fine-tune
+# viable at all here: fine-tuning XFeat's descriptor breaks LighterGlue,
+# because LighterGlue's first layer was fitted to XFeat's descriptor basis, so
+# the accuracy leader and the fine-tuning path are mutually exclusive. RIPE++
+# brings its own matcher and sidesteps that.
+#
+# Three checkpoints are published: MegaDepth (default), MegaDepth + Tokyo 24/7
+# (aachen_day_night), and SCARED (endoscopy). None is aerial-to-satellite, and
+# none is cross-date, so env80 decides whether any of it transfers. The Tokyo
+# variant is the one worth trying second: it is the only one trained for
+# appearance change across time of day, which is the nearest published analogue
+# to the cross-date problem in results/crossdate_wayback_curve.md.
+#
+# The adapter matches with a plain mutual nearest neighbour, the same reduction
+# every other learned method here uses, so the comparison isolates the
+# DESCRIPTOR. Its own trainable matcher is a separate experiment and would not
+# be comparable to the rest of this table.
+# --------------------------------------------------------------------------
+def _ripepp_root() -> Path | None:
+    candidates = [
+        os.environ.get("RIPEPP_ROOT"),
+        REPO_ROOT / "ripepp",
+        REPO_ROOT.parent / "third_party" / "RIPEpp",
+    ]
+    for c in candidates:
+        if not c:
+            continue
+        p = Path(c)
+        if (p / "ripepp" / "models" / "ripepp.py").exists():
+            return p
+    return None
+
+
+class RIPEppMethod(Method):
+    kind = "float"
+    learned = True
+
+    VARIANTS = {"ripepp": "default",
+                "ripepp_tokyo": "aachen_day_night",
+                "ripepp_scared": "scared"}
+
+    # Upstream's demo uses threshold=0.5 with top_k=2048. The threshold is a
+    # heatmap gate and, as with EdgePoint2's `score`, it and not top_k is what
+    # decides the keypoint count on a low-contrast frame -- which is every
+    # frame in this project. Kept at the published value so the first env80
+    # number is comparable with the paper; sweep it before drawing conclusions
+    # about keypoint budget, exactly as EdgePoint2's DEFAULT_SCORE had to be.
+    DEFAULT_THRESHOLD = 0.5
+
+    def __init__(self, name: str = "ripepp", max_keypoints: int = 4096,
+                 min_cossim: float = 0.82, threads: int = 0,
+                 threshold: float = None):
+        self.name = name
+        self.variant = self.VARIANTS.get(name, "default")
+        self.max_keypoints = int(max_keypoints)
+        self.min_cossim = float(min_cossim)
+        self.threads = threads
+        self.threshold = self.DEFAULT_THRESHOLD if threshold is None else float(threshold)
+        self._m = None
+        self._torch = None
+
+    def available(self) -> tuple:
+        root = _ripepp_root()
+        if root is None:
+            return False, ("RIPE++ not found. Set RIPEPP_ROOT, or clone "
+                           "https://github.com/fraunhoferhhi/RIPEpp to <repo>/ripepp.")
+        if self.name not in self.VARIANTS:
+            return False, f"unknown variant '{self.name}'. Known: {', '.join(self.VARIANTS)}"
+        for mod in ("torch", "torchvision", "omegaconf"):
+            try:
+                importlib.import_module(mod)
+            except ImportError as exc:
+                return False, f"{mod} unusable ({exc}) -- see bootstrap.sh"
+        # The checkpoint is downloaded on first use from a Fraunhofer server.
+        # Report that rather than letting a layer discover it on frame one, on
+        # a board that may have no network at all.
+        if self._checkpoint() is None:
+            return False, (f"checkpoint for '{self.variant}' not present. It downloads "
+                           "from cvg.hhi.fraunhofer.de on first use -- do that on a "
+                           "networked machine, not on the aircraft.")
+        return True, ""
+
+    def _checkpoint(self) -> Path | None:
+        """The local checkpoint, if it is already there. Never downloads."""
+        root = _ripepp_root()
+        if root is None:
+            return None
+        names = {"default": "ripe++.ckpt",
+                 "aachen_day_night": "ripe++_tokyo_megadepth.ckpt",
+                 "scared": "ripe++_scared.ckpt"}
+        fn = names[self.variant]
+        import torch
+        for c in (root / "weights" / fn,
+                  Path(torch.hub.get_dir()) / "checkpoints" / fn):
+            if c.exists():
+                return c
+        return None
+
+    def _load(self):
+        if self._m is not None:
+            return
+        root = _ripepp_root()
+        if root is None:
+            raise RuntimeError("RIPE++ not found")
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+        import torch
+        self._torch = torch
+        if self.threads:
+            torch.set_num_threads(int(self.threads))
+        ckpt = self._checkpoint()
+        if ckpt is None:
+            raise RuntimeError(
+                "RIPE++ checkpoint is not downloaded. Run it once on a networked "
+                "machine, or place the .ckpt in <ripepp>/weights/.")
+        mod = importlib.import_module("ripepp")
+        # device="cpu" explicitly, and it is the upstream default too. CLAUDE.md:
+        # no CUDA anywhere in this pipeline, because the headline measurement is
+        # joules per fix ACROSS BOARDS and a CUDA path on one of them compares
+        # implementations instead.
+        self._m = mod.load_model_from_checkpoint(ckpt, device="cpu").eval()
+
+    def detect(self, image_bgr: np.ndarray) -> Features:
+        self._load()
+        torch = self._torch
+        img = image_bgr
+        if img.ndim == 2:
+            img = np.repeat(img[:, :, None], 3, axis=2)
+        # RGB, 0..1, NCHW -- the same convention as EdgePoint2 and the opposite
+        # of XFeat's 0..255. Feeding the wrong range produces keypoints without
+        # complaint, just far worse ones, so there is nothing downstream to
+        # catch it except an inlier count that looks like a hard scene.
+        rgb = img[:, :, ::-1].copy()
+        t = torch.from_numpy(rgb).permute(2, 0, 1).float()[None] / 255.0
+        with torch.inference_mode():
+            kpts, desc, scores = self._m.detectAndCompute(
+                t, threshold=self.threshold, top_k=self.max_keypoints)
+        h, w = img.shape[:2]
+        return Features(
+            kpts=kpts.squeeze(0).cpu().numpy().astype(np.float32),
+            desc=desc.squeeze(0).cpu().numpy().astype(np.float32),
+            scores=scores.squeeze(0).cpu().numpy().astype(np.float32),
+            image_size=(w, h),
+        )
+
+    def match(self, fa: Features, fb: Features) -> tuple:
+        self._load()
+        torch = self._torch
+        if len(fa) == 0 or len(fb) == 0:
+            return np.zeros(0, int), np.zeros(0, int), np.zeros(0, np.float32)
+        da = torch.from_numpy(fa.desc)
+        db = torch.from_numpy(fb.desc)
+        with torch.inference_mode():
+            # Descriptors are not guaranteed L2-normalised the way XFeat's and
+            # EdgePoint2's are, and min_cossim is a COSINE threshold, so
+            # normalise rather than assume. Skipping this silently turns the
+            # gate into a magnitude test.
+            da = torch.nn.functional.normalize(da, dim=1)
+            db = torch.nn.functional.normalize(db, dim=1)
+            # Two GEMMs, never max(dim=0). Same reasoning as EdgePoint2Method:
+            # the single-matmul reduction is not monotonic in reference size
+            # and puts a 2x latency discontinuity where the prior's tile count
+            # decides which side a frame lands on. See CLAUDE.md.
+            cossim = da @ db.T
+            best, m12 = cossim.max(dim=1)
+            _, m21 = (db @ da.T).max(dim=1)
+            idx1 = torch.arange(len(m12))
+            keep = (m21[m12] == idx1) & (best > self.min_cossim)
+            idx1, idx2, conf = idx1[keep], m12[keep], best[keep]
+        return (idx1.cpu().numpy().astype(int),
+                idx2.cpu().numpy().astype(int),
+                conf.cpu().numpy().astype(np.float32))
+
+    def describe(self) -> dict:
+        d = super().describe()
+        d["variant"] = self.variant
+        d["threshold"] = self.threshold
+        d["licence"] = "Fraunhofer academic use only -- non-commercial, not shippable"
+        return d
+
+
+# --------------------------------------------------------------------------
 REGISTRY = {
     "orb":       lambda **kw: _OpenCVMethod("orb", kw.get("max_keypoints", 4096)),
     "sift":      lambda **kw: _OpenCVMethod("sift", kw.get("max_keypoints", 4096)),
@@ -530,6 +738,10 @@ REGISTRY = {
     "edgepoint2_s32": lambda **kw: EdgePoint2Method("edgepoint2_s32", **_ep2(kw)),
     "edgepoint2_s64": lambda **kw: EdgePoint2Method("edgepoint2_s64", **_ep2(kw)),
     "xfeat_lg":  lambda **kw: XFeatMethod("xfeat_lg", **_xf(kw)),
+    # Academic licence only -- measurable, never shippable. See the class.
+    "ripepp":        lambda **kw: RIPEppMethod("ripepp", **_ripe(kw)),
+    "ripepp_tokyo":  lambda **kw: RIPEppMethod("ripepp_tokyo", **_ripe(kw)),
+    "ripepp_scared": lambda **kw: RIPEppMethod("ripepp_scared", **_ripe(kw)),
 }
 
 
@@ -539,6 +751,12 @@ def _xf(kw: dict) -> dict:
         "min_cossim": kw.get("min_cossim", 0.82),
         "threads": kw.get("threads", 0),
     }
+
+
+def _ripe(kw: dict) -> dict:
+    d = _xf(kw)
+    d["threshold"] = kw.get("threshold")   # None means RIPEppMethod.DEFAULT_THRESHOLD
+    return d
 
 
 def _ep2(kw: dict) -> dict:

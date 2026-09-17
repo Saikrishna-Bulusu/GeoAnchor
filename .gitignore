@@ -17,3 +17,12 @@ data
 geoanchor-payload-*.tar.gz
 fleet/
 .metadata_cache/
+
+# PX4 SITL working directory: parameters.bson, dataman, ulog. Per-run state,
+# and scripts/px4_sitl.sh wipes it on every start so the test is reproducible.
+.px4_sitl/
+
+# RIPE++ clone. Third party, and under a Fraunhofer ACADEMIC-USE licence that
+# forbids commercial use -- it does not belong in this repo's history. Clone it
+# yourself, or set RIPEPP_ROOT. geoanchor/methods.py::RIPEppMethod finds it.
+ripepp/

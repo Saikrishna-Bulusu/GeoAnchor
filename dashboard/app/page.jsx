@@ -59,6 +59,7 @@ export default function Page() {
   const [runs, setRuns] = useState([]);
   const [fleet, setFleet] = useState(null);
   const [device, setDevice] = useState(null);
+  const [method, setMethod] = useState(null);
   const fileInput = useRef(null);
   const mapCanvas = useRef(null);
 
@@ -316,27 +317,49 @@ export default function Page() {
               </div>
             )}
 
-            {/* Every device's sessions, from the logs-repo clone. A board that
-                is powered off is still reviewable here, which is the point. */}
+            {/* Every board's sessions, from the logs-repo clone. A board that
+                is powered off is still reviewable here, which is the point.
+
+                Filtered by BOARD and by METHOD, because that pair is the
+                comparison this project makes -- joules and metres per fix
+                across compute classes at a fixed matcher -- and it is the axis
+                the logs repo is now sorted on. `boards`/`methods` come from
+                /api/fleet; `devices` is the old alias, read only as a fallback
+                so this panel still renders against an older API. */}
             {fleet?.available && fleet.runs?.length > 0 && (
               <div style={{ marginTop: 16, borderTop: '1px solid var(--line)', paddingTop: 13 }}>
                 <span className="kicker">
-                  Fleet &mdash; {fleet.devices.length} device{fleet.devices.length === 1 ? '' : 's'}
+                  Fleet &mdash; {(fleet.boards || fleet.devices || []).length} board
+                  {(fleet.boards || fleet.devices || []).length === 1 ? '' : 's'}
+                  {fleet.methods?.length ? `, ${fleet.methods.length} method${fleet.methods.length === 1 ? '' : 's'}` : ''}
                 </span>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '7px 0 9px' }}>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '7px 0 4px' }}>
                   <button className={`btn ${device === null ? 'on' : ''}`}
-                          onClick={() => setDevice(null)}>all</button>
-                  {fleet.devices.map((d) => (
+                          onClick={() => setDevice(null)}>all boards</button>
+                  {(fleet.boards || fleet.devices || []).map((d) => (
                     <button key={d} className={`btn ${device === d ? 'on' : ''}`}
                             onClick={() => setDevice(d)}>{d}</button>
                   ))}
                 </div>
+                {fleet.methods?.length > 0 && (
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '0 0 9px' }}>
+                    <button className={`btn ${method === null ? 'on' : ''}`}
+                            onClick={() => setMethod(null)}>all methods</button>
+                    {fleet.methods.map((m) => (
+                      <button key={m} className={`btn ${method === m ? 'on' : ''}`}
+                              onClick={() => setMethod(m)}>{m}</button>
+                    ))}
+                  </div>
+                )}
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {fleet.runs.filter((r) => device === null || r.device === device)
+                  {fleet.runs.filter((r) => (device === null || (r.board || r.device) === device)
+                                         && (method === null || r.method === method))
                     .slice(0, 12).map((r) => (
-                      <button key={`${r.device}/${r.name}`} className="btn"
-                              onClick={() => getJSON(`/api/fleet/${r.device}/${r.name}`).then(loadSession)}>
-                        <span style={{ color: 'var(--ink-faint)' }}>{r.device}</span>&nbsp;/&nbsp;{r.name}
+                      <button key={`${r.board || r.device}/${r.name}`} className="btn"
+                              onClick={() => getJSON(`/api/fleet/${r.board || r.device}/${r.name}`).then(loadSession)}>
+                        <span style={{ color: 'var(--ink-faint)' }}>{r.board || r.device}</span>
+                        {r.method ? <>&nbsp;/&nbsp;<span style={{ color: 'var(--ink-faint)' }}>{r.method}</span></> : null}
+                        &nbsp;/&nbsp;{r.name}
                       </button>
                     ))}
                 </div>
