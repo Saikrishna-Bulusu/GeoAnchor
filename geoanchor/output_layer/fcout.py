@@ -32,6 +32,59 @@ Two consequences that are easy to get wrong and impossible to notice:
   Splitting sigma^2 across both axes instead would hand EKF3 sigma * sqrt(2),
   a 41% overstatement of a number this whole project exists to calibrate.
 
+**PX4 READS THE SAME 21 FLOATS COMPLETELY DIFFERENTLY, and the difference is
+silent.** Verified against PX4 v1.16.2 source, not assumed:
+
+    EKF2.cpp:2265   ev_data.position_var(0) = fmaxf(evp_noise_var, pos_var(0))
+                    ev_data.position_var(1) = fmaxf(evp_noise_var, pos_var(1))
+
+It takes cov[0] and cov[6] as the X and Y variances SEPARATELY and never sums
+them. So the sigma^2 / 2 split that makes ArduPilot's posErr come out at sigma
+gives PX4 a per-axis sigma of sigma / sqrt(2) -- a covariance 29% too TIGHT on
+each axis, which is the dangerous direction: it tells the filter to trust a bad
+fix more than the estimator said to. Nothing on either side raises.
+
+So the split is chosen by `firmware`, and the invariant held across both is the
+one that matters: **the per-axis position sigma the estimator ends up using
+equals the `sigma_m` handed to send().** ArduPilot reaches that by summing
+(AP_NavEKF3_PosVelFusion.cpp:832 uses posErr directly as the per-axis sigma for
+both N and E); PX4 reaches it by being given sigma^2 in each axis directly.
+
+Two further PX4 differences worth knowing, both from the same source read:
+
+* **PX4 has no upper clamp on our covariance.** ArduPilot constrains posErr to
+  [0.01, 100] m; `ev_pos_control.cpp:145` only floors it, at
+  `max(cov, EKF2_EVP_NOISE^2, 0.01^2)`. The default `EKF2_EVP_NOISE` is 0.1 m,
+  so a sigma below 10 cm is silently raised and anything above it is taken as
+  given, however large. A learned estimator has MORE range to work with here
+  than on ArduPilot, not less.
+* **THE TWO FIRMWARES WANT OPPOSITE FRAMES, and both fail quietly.**
+  ArduPilot accepts only `MAV_FRAME_LOCAL_FRD` (20) and drops `LOCAL_NED`
+  without a word. PX4 accepts both at the MAVLink layer
+  (mavlink_receiver.cpp:1358, :1372) -- and then EKF2 treats them completely
+  differently (ev_pos_control.cpp:67):
+
+      LOCAL_FRAME_NED  + yaw_align   pos = ev_sample.pos        used as given
+      LOCAL_FRAME_FRD  + no ev_yaw   pos = R_ev_to_ekf * pos    ROTATED
+
+  An FRD sample from a source that does not also claim yaw is rotated by
+  `R_ev_to_ekf`, an estimated EV-to-EKF rotation filtered from the attitude in
+  our own message. This pipeline sends an IDENTITY quaternion and never claims
+  yaw, so that rotation is tracking the difference between "no attitude" and
+  the vehicle's real attitude, and it turns an absolute georeferenced position
+  into nonsense. Measured in PX4 SITL: a deliberate 20 m north injection
+  arrived in `vehicle_visual_odometry` as `position: [19.97, 0, 0]` -- correct
+  -- and reached `estimator_aid_src_ev_pos` as `observation: [-0.04, -0.14]`.
+  The same branch also INFLATES our covariance by the orientation variance
+  (`pos_cov(i,i) = max(pos_cov(i,i), orientation_var_max)`), which discards the
+  calibrated sigma this project exists to produce.
+
+  So the frame is firmware-dependent too, and for the same underlying reason as
+  the covariance: ArduPilot wants a body-referenced local frame, PX4's EKF2
+  wants a north-referenced one for an absolute fix. Nothing logs the mismatch
+  on either side -- ArduPilot returns early, PX4 quietly fuses the wrong number
+  or, as observed, reports `fused: false` with `innovation_rejected: false`.
+
 The three loop modes are the professor's, and the middle one is the useful
 trick: sending the vehicle its OWN position back over the ExternalNav path
 exercises the message, the covariance, the origin and the EKF's acceptance
@@ -74,7 +127,13 @@ UNKNOWN = float("nan")
 # is NOT accepted on this path, so sending it means every message is discarded
 # and the only symptom is an estimator that never sees external navigation.
 MAV_FRAME_LOCAL_FRD = 20
+MAV_FRAME_LOCAL_NED = 1
 MAV_FRAME_BODY_FRD = 12
+
+# Which local frame each firmware's estimator actually wants for an ABSOLUTE
+# georeferenced position. See the docstring: this is not a style choice, it
+# decides whether the position is used as sent or silently rotated.
+POSE_FRAME = {"ardupilot": MAV_FRAME_LOCAL_FRD, "px4": MAV_FRAME_LOCAL_NED}
 MAV_ESTIMATOR_TYPE_VISION = 2
 
 
@@ -117,7 +176,15 @@ class FlightControllerLink:
         self.mavutil = mavutil
         self.endpoint = endpoint
         self.message = message.upper()
-        self.firmware = firmware
+        # Normalised and checked, because this string now decides how the
+        # covariance is packed. A typo would silently select the ArduPilot
+        # split on a PX4 vehicle, which is exactly the 29%-too-tight covariance
+        # documented above and produces no error anywhere.
+        self.firmware = str(firmware).strip().lower()
+        if self.firmware not in ("ardupilot", "px4"):
+            raise FcError("OLDE-01",
+                          f"unknown firmware {firmware!r} -- must be 'ardupilot' or 'px4'. "
+                          "It selects the pose covariance layout, so there is no safe default.")
         self.origin = tuple(origin) if origin else None
         self.send_origin = send_origin
         self.angle_var = float(angle_sigma_rad) ** 2
@@ -195,8 +262,17 @@ class FlightControllerLink:
 
         # Zeros, not NaN. See the module docstring: ArduPilot sums the three
         # translational entries, so one NaN among them poisons posErr.
+        #
+        # The split is firmware-dependent because the two estimators read these
+        # same floats differently -- ArduPilot sums cov[0]+cov[6]+cov[11] into
+        # one 3D magnitude, PX4 takes cov[0] and cov[6] as the per-axis X and Y
+        # variances and never sums. Both branches are chosen so that the sigma
+        # the filter ends up applying PER AXIS is the sigma passed in here.
         cov = [0.0] * 21
-        cov[IDX_XX] = cov[IDX_YY] = (sigma ** 2) / 2.0   # radial -> per axis
+        if self.firmware == "px4":
+            cov[IDX_XX] = cov[IDX_YY] = sigma ** 2       # read per axis, as-is
+        else:
+            cov[IDX_XX] = cov[IDX_YY] = (sigma ** 2) / 2.0   # summed into posErr
         cov[IDX_ZZ] = 0.0                                 # so posErr == sigma
         # Altitude is still not claimed anywhere it matters: z is sent as 0 and
         # EK3_SRC1_POSZ is left off ExternalNav, so the flight controller keeps
@@ -212,7 +288,7 @@ class FlightControllerLink:
         try:
             if self.message == "ODOMETRY":
                 self.conn.mav.odometry_send(
-                    usec, MAV_FRAME_LOCAL_FRD, MAV_FRAME_BODY_FRD,
+                    usec, POSE_FRAME[self.firmware], MAV_FRAME_BODY_FRD,
                     float(north), float(east), 0.0,
                     [1.0, 0.0, 0.0, 0.0],
                     0.0, 0.0, 0.0, 0.0, 0.0, 0.0,

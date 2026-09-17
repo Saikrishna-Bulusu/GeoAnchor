@@ -1,0 +1,53 @@
+# PX4 v1.16.2 external-vision parameters for GeoAnchor.
+#
+# The ArduPilot equivalent is the extnav.parm block in the configs/flight.yaml
+# header. These are NOT translations of it -- the two firmwares expose a
+# different set of knobs, and three of these have no ArduPilot counterpart at
+# all. Every value below was read out of PX4's own parameter metadata
+# (src/modules/ekf2/params_external_vision.yaml, params_gnss.yaml, module.yaml)
+# for v1.16.2, not from a wiki page.
+#
+# Applied by scripts/px4_sitl.sh, which then reboots -- two of them say
+# reboot_required in the metadata and are silently ignored until you do.
+#
+# name              value   why
+EKF2_EV_CTRL            1   # bitmask, bit 0 = horizontal position ONLY.
+                            # Bit 1 (vertical) stays clear: altitude is the
+                            # flight controller's, from baro. Bit 2 (velocity)
+                            # stays clear: this pipeline sends none. Bit 3
+                            # (yaw) stays clear: it sends an identity
+                            # quaternion, so claiming yaw would feed the
+                            # estimator a constant heading of zero.
+                            # DEFAULTS TO 0 -- external vision is OFF until this
+                            # is set, which is the single most likely reason a
+                            # perfectly good fix appears to do nothing.
+EKF2_EV_NOISE_MD        0   # 0 = use the variance in OUR message, with
+                            # EKF2_EVP_NOISE as a lower bound. 1 discards it
+                            # and applies the parameter to every fix, which is
+                            # the "trust every fix identically" behaviour this
+                            # project's covariance work exists to avoid. If
+                            # this is 1, nothing upstream of it matters.
+EKF2_EVP_NOISE       0.05   # lower bound on our position sigma, metres. Set
+                            # below the tightest sigma the estimator is
+                            # expected to emit; anything tighter is silently
+                            # raised to this. There is NO upper clamp on this
+                            # path, unlike ArduPilot's [0.01, 100] m -- so a
+                            # learned estimator has more range here, not less.
+EKF2_EVP_GATE         5.0   # innovation gate, standard deviations. The same
+                            # 5-sigma test EKF3 applies.
+EKF2_EV_DELAY        50.0   # ms. REBOOT REQUIRED. Placeholder, matching the
+                            # ArduPilot block; replace with YOUR measured
+                            # median. Range here is 0-300, where ArduPilot's
+                            # VISO_DELAY_MS stops at 250.
+EKF2_EV_QMIN            0   # minimum ODOMETRY quality accepted, 0-100. 0
+                            # accepts anything. The analogue of VISO_QUAL_MIN;
+                            # raise it once inlier counts on the real
+                            # reference are known.
+EKF2_EV_POS_X         0.0   # camera offset forward of the IMU, metres
+EKF2_EV_POS_Y         0.0   # right
+EKF2_EV_POS_Z         0.0   # below
+EKF2_HGT_REF            0   # 0 = baro. REBOOT REQUIRED. DEFAULTS TO 1 (GPS),
+                            # which is the wrong reference for a vehicle that
+                            # is about to have GNSS taken away. 3 (vision)
+                            # would claim an altitude this pipeline does not
+                            # produce.
