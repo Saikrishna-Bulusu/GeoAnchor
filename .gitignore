@@ -36,3 +36,6 @@ models/
 # dataman, ulog. Per-run state, same as .px4_sitl/.
 .px4_agp/
 .px4_agp_e2e/
+
+# Gazebo/PX4 SITL working directory for the fixed-wing rig.
+.px4_sim/

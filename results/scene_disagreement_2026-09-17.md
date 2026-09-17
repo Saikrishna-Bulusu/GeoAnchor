@@ -64,6 +64,43 @@ So the hypothesis was half right. Reference-keypoint count explains the
 themselves — content, reference imagery, altitude distribution — still decides
 which matcher wins, and that remains open.
 
+## Reference RESOLUTION tested too, and it does not flip the sign either
+
+Scene_10's reference is **0.25 m/px against Scene_09's 0.139** — nearly 2x
+coarser, at comparable ground extent (230 m against 293 m). So its 1-tile
+geometry is a *consequence* of coarser reference rather than an independent
+variable, and the keypoint test above changed a downstream quantity.
+
+Tested directly: Scene_09's reference resampled to 0.25 m/px, ground extent
+preserved to the metre, frames and ground truth untouched.
+
+| matcher | 0.139 m/px (9 tiles) | 0.250 m/px (4 tiles) | |
+|---|---|---|---|
+| `xfeat_mnn` | 46.3% | **56.0%** | 1.2x |
+| `xfeat_lg` | 10.4% | **37.3%** | **3.6x** |
+
+**Coarsening the reference helps both matchers, and helps LighterGlue three
+times as much.** The gap narrows from 4.45:1 to 1.50:1 — but `xfeat_mnn` still
+wins.
+
+So Scene_09 favours `xfeat_mnn` under every manipulation tried:
+
+| Scene_09 configuration | ratio | winner |
+|---|---|---|
+| 18432 ref kp @ 0.139 m/px (as published) | 4.45:1 | mnn |
+| 2052 ref kp @ 0.139 m/px | 1.32:1 | mnn |
+| 8192 ref kp @ 0.250 m/px | 1.50:1 | mnn |
+
+and Scene_10 favours `xfeat_lg` at every reference size tested. **Two plausible
+mechanisms, both real and both large, neither sufficient.** What is left is
+scene content, and that is where the question now sits.
+
+One practical consequence worth carrying forward: **a coarser reference is not
+a worse one for this matcher.** Halving the reference resolution improved the
+plausible rate on both matchers. That runs against the intuition that finer
+reference imagery is always better, and it matters for choosing a reference
+product — the finest available may not be the right one.
+
 ## What is now safe to say
 
 - **"xfeat_mnn wins" is still a claim about Scene_09**, and the reversal is not
