@@ -1,9 +1,211 @@
 {
+  "brisbane": {
+    "lat": -27.47,
+    "lon": 153.025,
+    "services_answering": 101,
+    "services_probed": 196,
+    "acquisitions": [
+      {
+        "src_date": "20120703",
+        "src_res_m": 0.5,
+        "samp_res_m": 0.5,
+        "src_acc_m": 4.25,
+        "sensor": "WV02"
+      },
+      {
+        "src_date": "20130317",
+        "src_res_m": 0.5,
+        "samp_res_m": 0.5,
+        "src_acc_m": 10.0,
+        "sensor": "Pleiades"
+      },
+      {
+        "src_date": "20161004",
+        "src_res_m": 0.5,
+        "samp_res_m": 0.5,
+        "src_acc_m": 4.23,
+        "sensor": "WV02"
+      },
+      {
+        "src_date": "20171220",
+        "src_res_m": 0.31,
+        "samp_res_m": 0.31,
+        "src_acc_m": 4.23,
+        "sensor": "WV03_VNIR"
+      },
+      {
+        "src_date": "20190907",
+        "src_res_m": 0.5,
+        "samp_res_m": 0.3,
+        "src_acc_m": 4.23,
+        "sensor": "WV02"
+      },
+      {
+        "src_date": "20200707",
+        "src_res_m": 0.5,
+        "samp_res_m": 0.31,
+        "src_acc_m": 4.23,
+        "sensor": "WV02"
+      }
+    ],
+    "coverage": 0.515,
+    "source_run": "srcmeta3.out"
+  },
+  "melbourne": {
+    "lat": -37.818,
+    "lon": 144.967,
+    "services_answering": 49,
+    "services_probed": 196,
+    "acquisitions": [
+      {
+        "src_date": "20170307",
+        "src_res_m": 0.5,
+        "samp_res_m": 0.5,
+        "src_acc_m": 4.23,
+        "sensor": "WV02"
+      },
+      {
+        "src_date": "20190407",
+        "src_res_m": 0.5,
+        "samp_res_m": 0.3,
+        "src_acc_m": 4.23,
+        "sensor": "WV02"
+      },
+      {
+        "src_date": "20210603",
+        "src_res_m": 0.5,
+        "samp_res_m": 0.31,
+        "src_acc_m": 4.23,
+        "sensor": "WV02"
+      },
+      {
+        "src_date": "20220303",
+        "src_res_m": 0.46,
+        "samp_res_m": 0.3,
+        "src_acc_m": 5.0,
+        "sensor": "GE01"
+      },
+      {
+        "src_date": "20220813",
+        "src_res_m": 0.3,
+        "samp_res_m": 0.3,
+        "src_acc_m": 2.0,
+        "sensor": "WV03"
+      },
+      {
+        "src_date": "20250111",
+        "src_res_m": 0.31,
+        "samp_res_m": 0.15,
+        "src_acc_m": 8.47,
+        "sensor": "WV03"
+      }
+    ],
+    "coverage": 0.25,
+    "source_run": "srcmeta2.out"
+  },
+  "perth": {
+    "lat": -31.953,
+    "lon": 115.86,
+    "services_answering": 29,
+    "services_probed": 196,
+    "acquisitions": [
+      {
+        "src_date": "20160206",
+        "src_res_m": 0.31,
+        "samp_res_m": 0.31,
+        "src_acc_m": 4.23,
+        "sensor": "WV03"
+      },
+      {
+        "src_date": "20170109",
+        "src_res_m": 0.5,
+        "samp_res_m": 0.5,
+        "src_acc_m": 4.23,
+        "sensor": "WV02"
+      },
+      {
+        "src_date": "20180104",
+        "src_res_m": 0.31,
+        "samp_res_m": 0.31,
+        "src_acc_m": 4.23,
+        "sensor": "WV03_VNIR"
+      },
+      {
+        "src_date": "20230520",
+        "src_res_m": 0.46,
+        "samp_res_m": 0.3,
+        "src_acc_m": 5.0,
+        "sensor": "GE01"
+      },
+      {
+        "src_date": "20240124",
+        "src_res_m": 0.5,
+        "samp_res_m": 0.3,
+        "src_acc_m": 5.0,
+        "sensor": "WV02"
+      },
+      {
+        "src_date": "20250207",
+        "src_res_m": 0.31,
+        "samp_res_m": 0.3,
+        "src_acc_m": 8.47,
+        "sensor": "WV03"
+      }
+    ],
+    "coverage": 0.148,
+    "source_run": "srcmeta2.out",
+    "incomplete": true
+  },
+  "rural_griffith": {
+    "lat": -34.29,
+    "lon": 146.05,
+    "services_answering": 74,
+    "services_probed": 196,
+    "acquisitions": [
+      {
+        "src_date": "20091230",
+        "src_res_m": 0.5,
+        "samp_res_m": 0.5,
+        "src_acc_m": 10.2,
+        "sensor": "WV02"
+      },
+      {
+        "src_date": "20121025",
+        "src_res_m": 0.5,
+        "samp_res_m": 0.5,
+        "src_acc_m": 10.2,
+        "sensor": "WV02"
+      },
+      {
+        "src_date": "20151001",
+        "src_res_m": 0.46,
+        "samp_res_m": 0.46,
+        "src_acc_m": 10.2,
+        "sensor": "GE01"
+      },
+      {
+        "src_date": "20210501",
+        "src_res_m": 0.5,
+        "samp_res_m": 0.5,
+        "src_acc_m": 5.0,
+        "sensor": "WV02"
+      },
+      {
+        "src_date": "20250218",
+        "src_res_m": 0.34,
+        "samp_res_m": 0.6,
+        "src_acc_m": 5.0,
+        "sensor": "LG02"
+      }
+    ],
+    "coverage": 0.378,
+    "source_run": "srcmeta3.out"
+  },
   "sydney": {
     "lat": -33.8688,
     "lon": 151.2093,
-    "services_probed": 196,
     "services_answering": 64,
+    "services_probed": 196,
     "acquisitions": [
       {
         "src_date": "20130207",
@@ -54,50 +256,9 @@
         "src_acc_m": 8.47,
         "sensor": "WV03"
       }
-    ]
+    ],
+    "coverage": 0.327,
+    "source_run": "srcmeta.out"
   },
-  "melbourne": {
-    "lat": -37.818,
-    "lon": 144.967,
-    "services_probed": 196,
-    "services_answering": 36,
-    "acquisitions": [
-      {
-        "src_date": "20130831",
-        "src_res_m": 0.5,
-        "samp_res_m": 0.5,
-        "src_acc_m": 10.0,
-        "sensor": "Pleiades"
-      },
-      {
-        "src_date": "20150221",
-        "src_res_m": 0.5,
-        "samp_res_m": 0.5,
-        "src_acc_m": 4.23,
-        "sensor": "WV02"
-      },
-      {
-        "src_date": "20170307",
-        "src_res_m": 0.5,
-        "samp_res_m": 0.5,
-        "src_acc_m": 4.23,
-        "sensor": "WV02"
-      },
-      {
-        "src_date": "20210603",
-        "src_res_m": 0.5,
-        "samp_res_m": 0.31,
-        "src_acc_m": 4.23,
-        "sensor": "WV02"
-      },
-      {
-        "src_date": "20220303",
-        "src_res_m": 0.46,
-        "samp_res_m": 0.3,
-        "src_acc_m": 5.0,
-        "sensor": "GE01"
-      }
-    ]
-  },
-  "_note": "Sydney and Melbourne only. Esri's metadata service rate-limits after a few hundred identify calls and refused the service listing for the remaining areas; re-run scripts/wayback_source_meta.py --areas brisbane,perth,rural_griffith after a cooldown."
+  "_note": "Merged: for each area the run with the BEST service coverage. Esri throttles after a few hundred identify calls, and a throttled area returns a short acquisition list that looks like a complete record -- `coverage` below 0.25 sets `incomplete`. Re-run a flagged area alone after a cooldown."
 }

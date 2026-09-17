@@ -54,5 +54,77 @@
         "sensor": "WV02"
       }
     ]
+  },
+  "perth": {
+    "lat": -31.953,
+    "lon": 115.86,
+    "services_probed": 196,
+    "services_answering": 7,
+    "acquisitions": [
+      {
+        "service": "World_Imagery_Metadata_2026_r01",
+        "src_date": "20250207",
+        "src_res_m": 0.31,
+        "src_acc_m": 8.47,
+        "samp_res_m": 0.3,
+        "sensor": "WV03"
+      },
+      {
+        "service": "World_Imagery_Metadata_2026_r03",
+        "src_date": "20251206",
+        "src_res_m": 0.5,
+        "src_acc_m": 8.47,
+        "samp_res_m": 0.3,
+        "sensor": "WV02"
+      }
+    ]
+  },
+  "rural_griffith": {
+    "lat": -34.29,
+    "lon": 146.05,
+    "services_probed": 196,
+    "services_answering": 74,
+    "acquisitions": [
+      {
+        "service": "World_Imagery_Metadata_2014_r01",
+        "src_date": "20091230",
+        "src_res_m": 0.5,
+        "src_acc_m": 10.2,
+        "samp_res_m": 0.5,
+        "sensor": "WV02"
+      },
+      {
+        "service": "World_Imagery_Metadata_2016_r20",
+        "src_date": "20121025",
+        "src_res_m": 0.5,
+        "src_acc_m": 10.2,
+        "samp_res_m": 0.5,
+        "sensor": "WV02"
+      },
+      {
+        "service": "World_Imagery_Metadata_2018_r05",
+        "src_date": "20151001",
+        "src_res_m": 0.46,
+        "src_acc_m": 10.2,
+        "samp_res_m": 0.46,
+        "sensor": "GE01"
+      },
+      {
+        "service": "World_Imagery_Metadata_2022_r11",
+        "src_date": "20210501",
+        "src_res_m": 0.5,
+        "src_acc_m": 5.0,
+        "samp_res_m": 0.5,
+        "sensor": "WV02"
+      },
+      {
+        "service": "World_Imagery_Metadata_2026_r05",
+        "src_date": "20250218",
+        "src_res_m": 0.34,
+        "src_acc_m": 5.0,
+        "samp_res_m": 0.6,
+        "sensor": "LG02"
+      }
+    ]
   }
 }

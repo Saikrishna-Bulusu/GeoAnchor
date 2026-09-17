@@ -157,6 +157,39 @@ error.
 
 This applies to `results/crossdate_wayback_curve.md` too.
 
+### The rural area wins on WORSE imagery, which rules out the alternatives
+
+All five areas resolved (Perth only at 15% service coverage, so its list is
+flagged `incomplete` — Esri throttles and a throttled area returns a short
+acquisition list that looks like a complete record).
+
+| | rural Griffith | Sydney CBD |
+|---|---|---|
+| acquisitions | 5, spanning **2009-12-30 → 2025-02-18** | 7, 2013 → 2025 |
+| native resolution | 0.34 – 0.50 m | 0.30 – 0.50 m |
+| stated horizontal accuracy | **5.0 – 10.2 m** | 2.0 – 8.47 m |
+| sensors | WV02, GE01, LG02 | WV02, WV03, GE01, Pleiades |
+| cross-date result | **works at every gap to 8.8 yr, 118–443 inliers** | fails past ~3 yr, ~20 inliers |
+
+**The rural area matches across 8.8 years on imagery that is slightly coarser
+and noticeably worse georeferenced than the Sydney CBD's.** Its older captures
+are stated at 10.2 m horizontal accuracy against Sydney's 2.0–4.23 m, and it
+still returns 118–443 inliers and a 0.02–1.92 m median.
+
+That closes the two obvious alternative explanations:
+
+- **Not resolution.** 0.34–0.50 m against 0.30–0.50 m; if anything the rural
+  source is the coarser one.
+- **Not georeferencing quality.** The rural captures are the *less* accurately
+  georeferenced of the two, by a factor of two to five.
+- **Not sensor family.** Both are WorldView / GeoEye imagery from the same
+  providers.
+
+Same sensors, same resolution class, worse stated accuracy — and it works where
+the CBDs do not. **What is left is what is on the ground**, which is the
+conclusion this file opened with and which the metadata now supports rather
+than merely allows.
+
 ## Per-area tables
 
 
