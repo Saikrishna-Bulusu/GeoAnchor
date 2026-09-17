@@ -9,10 +9,14 @@
 #
 # Layout in the logs repo, which is what /api/fleet reads:
 #
-#     <device>/<run-id>/session.json
-#     <device>/<run-id>/records.jsonl
-#     <device>/<run-id>/*.jsonl
-#     <device>/board.json                    what this device is
+#     board/<board>/<method>/<run-id>/session.json
+#     board/<board>/<method>/<run-id>/records.jsonl
+#     board/<board>/<method>/<run-id>/*.jsonl
+#     board/<board>/board.json               what this class of board is
+#
+# Board then method, because that is the comparison the paper makes. Both
+# facts are read out of session.json by geoanchor/log_layout.py, so the sort is
+# mechanical and a renamed host does not fork the tree.
 #
 # WHY A SEPARATE REPO. Session transcripts are ~100 KB per run and every board
 # writes them continuously. In the code repo they would bloat history forever
@@ -38,12 +42,20 @@ DEVICE="${GEOANCHOR_DEVICE:-$(hostname -s)}"
 PULL_ONLY=0
 DRY=0
 
+# A transcript is meant to be ~100 KB. A looping feed left running for days
+# produces one per FIX, and one such run reached 402 MB across 337k JSONL
+# lines -- which in a git repo is permanent, for a synthetic replay whose only
+# content is that the wiring works. Runs above this are skipped with a line
+# saying so; raise it with --max-run-mb when a big one is genuinely wanted.
+MAX_RUN_MB="${GEOANCHOR_MAX_RUN_MB:-32}"
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --pull-only) PULL_ONLY=1; shift ;;
     --dry-run)   DRY=1; shift ;;
     --remote)    LOGS_REMOTE="$2"; shift 2 ;;
     --device)    DEVICE="$2"; shift 2 ;;
+    --max-run-mb) MAX_RUN_MB="$2"; shift 2 ;;
     -h|--help)   sed -n '2,30p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1"; exit 2 ;;
   esac
@@ -91,13 +103,11 @@ fi
 
 if [ "$PULL_ONLY" = "1" ]; then
   echo
-  echo "pull-only: done. $(find . -name session.json -not -path './.git/*' | wc -l) sessions from $(find . -maxdepth 1 -type d -not -name .git -not -name . | wc -l) devices."
+  echo "pull-only: done. $(find . -name session.json -not -path './.git/*' | wc -l) sessions from $(ls -d board/*/ 2>/dev/null | wc -l) boards."
   exit 0
 fi
 
 # ----------------------------------------------------------------- push ----
-mkdir -p "$DEVICE"
-
 # A one-line record of what this device IS, so a session's numbers can be read
 # against the hardware that produced them without guessing from the hostname.
 #
@@ -109,7 +119,9 @@ mkdir -p "$DEVICE"
 #     "detect_error": "No module named 'geoanchor'"
 # and none of them recorded model, cores or RAM. That is the entire reason
 # board.json exists, and it silently did not do it on any device.
-"$REPO/.venv/bin/python" - "$DEVICE/board.json" "$REPO" <<'PYEOF' 2>/dev/null || true
+BOARD_SLUG="$(PYTHONPATH="$REPO" "$REPO/.venv/bin/python" -m geoanchor.log_layout --board-slug 2>/dev/null || echo unknown-board)"
+mkdir -p "board/$BOARD_SLUG"
+"$REPO/.venv/bin/python" - "board/$BOARD_SLUG/board.json" "$REPO" <<'PYEOF' 2>/dev/null || true
 import json, os, sys, platform
 sys.path.insert(0, sys.argv[2])
 info = {"hostname": platform.node(), "arch": platform.machine(),
@@ -130,11 +142,20 @@ open(sys.argv[1], "w").write(json.dumps(info, indent=2) + "\n")
 PYEOF
 
 COPIED=0
+SKIPPED=0
 for d in "$REPO"/runs/*/; do
   [ -d "$d" ] || continue
   name="$(basename "$d")"
   [ -f "$d/session.json" ] || continue          # unfinished run, skip it
-  dest="$DEVICE/$name"
+
+  # board/<board>/<method>/<run>/ -- see geoanchor/log_layout.py. The device
+  # name is NOT part of the path: two boards of the same kind belong in the
+  # same directory, and the hostname is already recorded inside session.json.
+  dest="$(PYTHONPATH="$REPO" "$REPO/.venv/bin/python" -m geoanchor.log_layout --dest "$d/session.json" "$name" 2>/dev/null)"
+  if [ -z "$dest" ]; then
+    echo "  skipping $name -- cannot classify its session.json"
+    continue
+  fi
 
   # Skip a run already pushed and unchanged, so a sync after a quiet hour is
   # a no-op rather than a rewrite of every file.
@@ -143,8 +164,16 @@ for d in "$REPO"/runs/*/; do
     continue
   fi
 
+  # Size guard, measured over exactly the files that would be copied.
+  mb=$(du -cm "$d/session.json" "$d"/*.jsonl 2>/dev/null | tail -1 | cut -f1)
+  if [ -n "$mb" ] && [ "$mb" -gt "$MAX_RUN_MB" ]; then
+    echo "  skipping $name -- ${mb} MB exceeds --max-run-mb $MAX_RUN_MB"
+    SKIPPED=$((SKIPPED+1))
+    continue
+  fi
+
   if [ "$DRY" = "1" ]; then
-    echo "  would copy $name"
+    echo "  would copy $name (${mb} MB)"
     COPIED=$((COPIED+1))
     continue
   fi
@@ -162,7 +191,7 @@ if [ "$DRY" = "1" ]; then
   exit 0
 fi
 
-echo "staged $COPIED runs from $DEVICE"
+echo "staged $COPIED runs from $DEVICE${SKIPPED:+, skipped $SKIPPED as oversized}"
 
 if [ -z "$(git status --porcelain)" ]; then
   echo "nothing changed -- already in sync"
@@ -177,7 +206,7 @@ git -c user.name="$DEVICE" \
 echo "pushing"
 if git push 2>&1 | sed 's/^/  /'; then
   echo
-  echo "done. $(find . -name session.json -not -path './.git/*' | wc -l) sessions from $(ls -d */ 2>/dev/null | wc -l) devices."
+  echo "done. $(find . -name session.json -not -path './.git/*' | wc -l) sessions from $(ls -d board/*/ 2>/dev/null | wc -l) boards."
 else
   echo
   echo "Push failed. The commit is local in $FLEET_DIR and nothing is lost;"

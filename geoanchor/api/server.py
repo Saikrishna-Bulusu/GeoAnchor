@@ -23,6 +23,7 @@ from .. import codes as C
 from .. import config as cfgmod
 from .. import contracts as K
 from .. import device
+from .. import log_layout
 from .. import methods as M
 from ..bus import CommandClient, Subscriber
 
@@ -254,43 +255,59 @@ def create_app(cfg: cfgmod.Config):
 
     # ------------------------------------------------------------ fleet ----
     # Sessions from OTHER devices, read out of a clone of the logs repo. The
-    # layout is <fleet_dir>/<device>/<run>/session.json, which is exactly what
-    # scripts/sync_logs.sh pushes.
+    # layout is <fleet_dir>/board/<board>/<method>/<run>/session.json, which is
+    # exactly what scripts/sync_logs.sh pushes. geoanchor.log_layout.iter_runs
+    # owns the walk, and still reads the old <device>/<run>/ layout too, so a
+    # clone that has not been migrated keeps showing up here.
     #
     # Read-only and entirely separate from `runs`: this API never writes into
     # the clone and never runs git. Syncing is a scheduled job on each device,
     # so a board that is off, or a laptop with no network, degrades to "its
     # runs are not listed yet" rather than to a failed request here.
 
+    def _fleet_index(root):
+        """{run name -> (board, method, dir)} for a logs clone."""
+        return {name: (board, method, d)
+                for board, method, name, d in log_layout.iter_runs(root)}
+
     @app.get("/api/fleet")
     def fleet():
         root = cfg.resolve("session.fleet_dir", "fleet")
         if not root or not root.is_dir():
-            return {"available": False, "devices": [], "runs": []}
+            return {"available": False, "devices": [], "boards": [],
+                    "methods": [], "runs": []}
         out = []
-        for dev in sorted(p for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")):
-            for d in dev.iterdir():
-                s = d / "session.json"
-                if s.exists():
-                    st = s.stat()
-                    out.append({"device": dev.name, "name": d.name,
-                                "size": st.st_size, "modified": st.st_mtime})
+        for name, (board, method, d) in _fleet_index(root).items():
+            st = (d / "session.json").stat()
+            # `device` is kept as an alias of `board` so an older dashboard
+            # build keeps rendering against this endpoint rather than showing
+            # an empty fleet the moment the API is updated first.
+            out.append({"board": board, "device": board, "method": method,
+                        "name": name, "size": st.st_size,
+                        "modified": st.st_mtime})
         out.sort(key=lambda r: r["modified"], reverse=True)
         return {"available": True,
-                "devices": sorted({r["device"] for r in out}),
+                "boards": sorted({r["board"] for r in out}),
+                "devices": sorted({r["board"] for r in out}),
+                "methods": sorted({r["method"] for r in out}),
                 "runs": out}
 
     @app.get("/api/fleet/{device}/{name}")
     def fleet_session(device: str, name: str):
+        # A run name is unique across the whole logs repo (it is a UTC stamp),
+        # so the lookup is by name and `device` is accepted only to keep the
+        # URL shape stable. Resolving by name rather than by path is also what
+        # stops a ../.. in either segment from meaning anything at all.
         root = cfg.resolve("session.fleet_dir", "fleet")
         if not root or not root.is_dir():
             raise HTTPException(404, "no fleet directory")
-        p = (root / device / name / "session.json").resolve()
-        # Same containment check as /api/runs/{name}: `device` and `name` come
-        # off the wire, so ../.. in either would otherwise escape the clone.
-        if root.resolve() not in p.parents or not p.exists():
+        hit = _fleet_index(root).get(name)
+        if not hit:
             raise HTTPException(404, "no such run")
-        return FileResponse(p, media_type="application/json")
+        board, _method, d = hit
+        if device not in (board, "_", ""):
+            raise HTTPException(404, "no such run")
+        return FileResponse(d / "session.json", media_type="application/json")
 
     @app.get("/api/export")
     def export():
