@@ -12,7 +12,7 @@ so the same checkout runs from any directory on any board.
 ## The 60-second version
 
 ```bash
-git clone https://github.com/Saikrishna-Bulusu/geoanchor-rt.git ~/geoanchor-rt
+git clone https://github.com/Saikrishna-Bulusu/GeoAnchor.git ~/geoanchor-rt
 cd ~/geoanchor-rt
 bash bootstrap.sh
 bash scripts/check_board.sh

@@ -82,7 +82,7 @@ a real finding about this class of hardware, not a setup problem. See
 ## Install and run
 
 ```bash
-git clone https://github.com/Saikrishna-Bulusu/geoanchor-rt.git
+git clone https://github.com/Saikrishna-Bulusu/GeoAnchor.git
 cd geoanchor-rt
 bash bootstrap.sh                             # once per board
 python -m geoanchor.data_layer --build-map    # once per new map
